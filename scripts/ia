@@ -17,11 +17,13 @@ need_local_model() {
   if ! curl -sf --max-time 3 "$LOCAL_URL/v1/models" >/dev/null; then
     echo "Sin servidor de modelos en $LOCAL_URL"; server_hint; exit 1
   fi
+  local models
+  models="$(local_models)"
   if [ -z "$LOCAL_MODEL" ]; then
-    LOCAL_MODEL="$(local_models | head -1)"
+    LOCAL_MODEL="${models%%$'\n'*}"
     [ -n "$LOCAL_MODEL" ] || { echo "No hay ningún modelo cargado"; echo "  → LM Studio: carga uno en la pestaña Developer"; exit 1; }
-  elif ! local_models | grep -qxF "$LOCAL_MODEL"; then
-    echo "Modelo '$LOCAL_MODEL' no disponible. Modelos en el servidor:"; local_models | sed 's/^/  - /'
+  elif ! grep -qxF -- "$LOCAL_MODEL" <<<"$models"; then
+    echo "Modelo '$LOCAL_MODEL' no disponible. Modelos en el servidor:"; while IFS= read -r m; do echo "  - $m"; done <<<"$models"
     echo "  → Corrige LOCAL_MODEL en .env (o déjalo vacío) y ejecuta: docker compose up -d"; exit 1
   fi
 }
@@ -107,7 +109,8 @@ EOF
 estado_local() {
   local m
   if ! curl -sf --max-time 2 "$LOCAL_URL/v1/models" >/dev/null; then echo "sin servidor"; return; fi
-  m="${LOCAL_MODEL:-$(local_models | head -1)}"
+  m="$(local_models)"
+  m="${LOCAL_MODEL:-${m%%$'\n'*}}"
   echo "${m:-sin modelo cargado}"
 }
 
