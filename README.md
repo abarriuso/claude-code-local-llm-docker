@@ -16,3 +16,5 @@ Windows
    └─ llamacpp (opcional) ── GPU ── :8080 ◄───────────┘
        volumen: models
 ```
+
+[Manual de uso](MANUAL.md)
