@@ -4,21 +4,33 @@ set -euo pipefail
 LOCAL_URL="${LOCAL_URL:-http://host.docker.internal:1234}"
 LOCAL_MODEL="${LOCAL_MODEL:-}"
 
-local_models() { curl -sf --max-time 5 "$LOCAL_URL/v1/models" | jq -r '.data[].id'; }
+local_models() { curl -sf --max-time 3 "$LOCAL_URL/v1/models" | jq -r '.data[].id' | grep -viE 'embed' || true; }
+
+server_hint() {
+  case "$LOCAL_URL" in
+    *llamacpp*) echo "  → llama.cpp puede estar descargando el modelo. En Windows: docker compose logs -f llamacpp" ;;
+    *)          echo "  → LM Studio: Developer → Start Server (puerto 1234)" ;;
+  esac
+}
 
 need_local_model() {
-  curl -sf --max-time 5 "$LOCAL_URL/v1/models" >/dev/null \
-    || { echo "Sin servidor de modelos en $LOCAL_URL"; exit 1; }
+  if ! curl -sf --max-time 3 "$LOCAL_URL/v1/models" >/dev/null; then
+    echo "Sin servidor de modelos en $LOCAL_URL"; server_hint; exit 1
+  fi
   if [ -z "$LOCAL_MODEL" ]; then
-    LOCAL_MODEL="$(local_models | grep -viE 'embed' | head -1)"
-    [ -n "$LOCAL_MODEL" ] || { echo "No hay ningún modelo cargado"; exit 1; }
+    LOCAL_MODEL="$(local_models | head -1)"
+    [ -n "$LOCAL_MODEL" ] || { echo "No hay ningún modelo cargado"; echo "  → LM Studio: carga uno en la pestaña Developer"; exit 1; }
   elif ! local_models | grep -qxF "$LOCAL_MODEL"; then
-    echo "Modelo '$LOCAL_MODEL' no disponible"; exit 1
+    echo "Modelo '$LOCAL_MODEL' no disponible. Modelos en el servidor:"; local_models | sed 's/^/  - /'
+    echo "  → Corrige LOCAL_MODEL en .env (o déjalo vacío) y ejecuta: docker compose up -d"; exit 1
   fi
 }
 
 need_api_key() {
-  [ -n "${ANTHROPIC_API_KEY:-}" ] || { echo "Falta ANTHROPIC_API_KEY en .env"; exit 1; }
+  [ -n "${ANTHROPIC_API_KEY:-}" ] && return
+  echo "Falta ANTHROPIC_API_KEY"
+  echo "  → Añádela en .env y ejecuta en Windows: docker compose up -d"
+  exit 1
 }
 
 write_opencode_config() {
@@ -76,16 +88,38 @@ opencode_api() {
 }
 
 modelos() {
-  curl -sf --max-time 5 "$LOCAL_URL/v1/models" >/dev/null \
-    || { echo "Sin servidor de modelos en $LOCAL_URL"; exit 1; }
+  if ! curl -sf --max-time 3 "$LOCAL_URL/v1/models" >/dev/null; then
+    echo "Sin servidor de modelos en $LOCAL_URL"; server_hint; exit 1
+  fi
   local_models
+}
+
+ayuda() {
+  cat <<EOF
+Uso: ia [opción] [argumentos de la herramienta]
+
+  ia          menú
+  ia 1        Claude Code con la suscripción
+  ia 4 -c     OpenCode con modelo local, continuando la última sesión
+EOF
+}
+
+estado_local() {
+  local m
+  if ! curl -sf --max-time 2 "$LOCAL_URL/v1/models" >/dev/null; then echo "sin servidor"; return; fi
+  m="${LOCAL_MODEL:-$(local_models | head -1)}"
+  echo "${m:-sin modelo cargado}"
 }
 
 opcion="${1:-}"
 [ $# -gt 0 ] && shift
 
 if [ -z "$opcion" ]; then
+  [ -n "${ANTHROPIC_API_KEY:-}" ] && api="configurada" || api="sin configurar"
   cat <<EOF
+
+  Modelo local: $(estado_local)
+  API Anthropic: $api
 
   Claude Code
     1) Suscripción Claude
@@ -110,6 +144,7 @@ case "$opcion" in
   4) opencode_local "$@" ;;
   5) opencode_api "$@" ;;
   6) modelos ;;
+  -h|--help|help) ayuda ;;
   0|"") exit 0 ;;
-  *) echo "Opción no válida"; exit 1 ;;
+  *) echo "Opción no válida: $opcion"; ayuda; exit 1 ;;
 esac
