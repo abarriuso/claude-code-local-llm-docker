@@ -10,8 +10,9 @@ Windows
    │                                                  │
    ├─ workspace ──────────────────────────────────────┤
    │   Claude Code · OpenCode · git · gh · Node 22    │
-   │   menú: ia                                       │
-   │   volúmenes: home, workspace                     ├──► api.anthropic.com
+   │   menú: ia · usuario sin privilegios             │
+   │   volúmenes: home, workspace                     │
+   │   cortafuegos de salida ─────────────────────────┼──► Anthropic, npm, GitHub
    │                                                  │
    └─ llamacpp (opcional) ── GPU ── :8080 ◄───────────┘
        volumen: models

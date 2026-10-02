@@ -1,0 +1,9 @@
+{
+  "name": "claude-code-local-llm-docker",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "workspace",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "node",
+  "overrideCommand": false,
+  "shutdownAction": "none"
+}

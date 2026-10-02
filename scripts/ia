@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ "$(id -u)" = 0 ]; then
+  exec setpriv --reuid=node --regid=node --init-groups -- "$0" "$@"
+fi
+
 LOCAL_URL="${LOCAL_URL:-http://host.docker.internal:1234}"
 LOCAL_MODEL="${LOCAL_MODEL:-}"
 
@@ -132,6 +136,9 @@ case "$opcion" in
   3) opencode_local "$@" ;;
   4) opencode_api "$@" ;;
   5) modelos ;;
+  --estado)
+    [ -n "${ANTHROPIC_API_KEY:-}" ] && api="configurada" || api="sin configurar"
+    echo "$(estado_local)|$api" ;;
   -h|--help|help) ayuda ;;
   0|"") exit 0 ;;
   *) echo "Opción no válida: $opcion"; ayuda; exit 1 ;;

@@ -4,9 +4,18 @@ services:
   workspace:
     build: .
     restart: unless-stopped
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
       DISABLE_AUTOUPDATER: "1"
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, NET_RAW, SETUID, SETGID]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${WORKSPACE_MEMORY:-4g}
+    cpus: ${WORKSPACE_CPUS:-2}
+    pids_limit: 1024
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

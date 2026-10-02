@@ -8,8 +8,9 @@
 6. [Uso diario](#6-uso-diario)
 7. [Modelo local](#7-modelo-local)
 8. [Configuración](#8-configuración)
-9. [Actualizar, parar y borrar](#9-actualizar-parar-y-borrar)
-10. [Solución de problemas](#10-solución-de-problemas)
+9. [Seguridad](#9-seguridad)
+10. [Actualizar, parar y borrar](#10-actualizar-parar-y-borrar)
+11. [Solución de problemas](#11-solución-de-problemas)
 
 ## 1. Requisitos
 
@@ -45,21 +46,28 @@ Sin Git: en GitHub, *Code → Download ZIP*, y descomprimir.
 .\iniciar.cmd -LlamaCpp    # modelo local en llama.cpp (Docker)
 ```
 
-El script comprueba Docker, crea `.env` si no existe, arranca los contenedores y abre el menú. La primera vez construye la imagen y tarda unos minutos.
+El script comprueba la instalación, abre Docker Desktop si está cerrado, crea `.env` si no existe, arranca el entorno, espera a que el cortafuegos esté activo y abre el menú. La primera vez construye la imagen y tarda 5-10 minutos.
 
 ## 4. Menú
 
-| Opción | Herramienta | Modelo |
-|---|---|---|
-| 1 | Claude Code | Suscripción de Claude |
-| 2 | Claude Code | API de Anthropic (`ANTHROPIC_API_KEY`) |
-| 3 | OpenCode | Modelo local |
-| 4 | OpenCode | API de Anthropic (`ANTHROPIC_API_KEY`) |
-| 5 | — | Lista los modelos locales disponibles |
+El menú se queda en la ventana de `iniciar.cmd`. **Cada opción se abre en una pestaña nueva** de Windows Terminal (o en una ventana nueva si no está instalado), así se pueden usar varias herramientas a la vez.
 
-La cabecera del menú muestra el modelo local detectado y si la clave de API está configurada.
+| Opción | Qué abre |
+|---|---|
+| 1 | Claude Code con la suscripción de Claude |
+| 2 | Claude Code con la API de Anthropic (`ANTHROPIC_API_KEY`) |
+| 3 | OpenCode con el modelo local |
+| 4 | OpenCode con la API de Anthropic (`ANTHROPIC_API_KEY`) |
+| 5 | Lista de modelos locales disponibles |
+| 6 | Terminal del entorno (git, gh, npm…) |
+| 7 | Para el entorno |
+| 0 | Cierra el menú; el entorno sigue encendido |
 
-Atajos:
+La cabecera muestra el modelo local detectado y si la clave de API está configurada. Si una opción no se puede usar todavía (falta la clave o el modelo), el menú lo explica en vez de abrirla.
+
+Dentro del entorno (por ejemplo, en la terminal de VS Code o en la opción 6) existe el mismo menú en modo texto: `ia`.
+
+Atajos de `ia`:
 
 ```bash
 ia 1          # abre la opción 1 directamente
@@ -69,7 +77,7 @@ ia -h         # ayuda
 
 ## 5. Primer uso
 
-Dentro del contenedor (`docker compose exec workspace bash`):
+Dentro del contenedor (`docker compose exec -u node workspace bash`, o la terminal de VS Code):
 
 ```bash
 gh auth login                                  # GitHub: código de un solo uso en el navegador
@@ -87,14 +95,22 @@ Las sesiones de Claude Code, OpenCode y GitHub se conservan entre reinicios.
 
 Con Docker Desktop abierto, desde la carpeta del repositorio:
 
+Ejecutar `iniciar.cmd`: si el entorno ya está en marcha, abre el menú en segundos.
+
+Sin el menú, desde la carpeta del repositorio:
+
 ```powershell
-docker compose exec workspace ia       # menú
-docker compose exec workspace bash     # terminal
+docker compose exec -u node workspace ia       # menú en modo texto
+docker compose exec -u node workspace bash     # terminal
 ```
 
-Si los contenedores están parados, volver a ejecutar `iniciar.cmd`.
+**Abrir en VS Code:**
 
-**Editar con VS Code:** extensión *Dev Containers* → *Attach to Running Container* → `entorno-ia-workspace-1` → abrir `/workspace/<repo>`.
+1. Instalar la extensión *Dev Containers*.
+2. *File → Open Folder* → carpeta del repositorio.
+3. *Reopen in Container* (aviso abajo a la derecha, o `F1` → *Dev Containers: Reopen in Container*).
+
+VS Code se abre dentro del entorno en `/workspace`, con el usuario `node`. La terminal integrada ya está dentro: `ia` abre el menú.
 
 **Servidores de desarrollo:** arrancarlos escuchando en `0.0.0.0` y abrirlos en Windows:
 
@@ -151,6 +167,10 @@ Fichero `.env` en la carpeta del repositorio:
 | `ANTHROPIC_API_KEY` | Clave de API de Anthropic (opciones 2 y 4) |
 | `CLAUDE_MODEL` | Modelo de Claude en OpenCode. Vacío = elegir con `/models` |
 | `GIT_USER_NAME`, `GIT_USER_EMAIL` | Identidad de git dentro del contenedor |
+| `FIREWALL` | `on` (por defecto) u `off` |
+| `FIREWALL_ALLOW` | Dominios, IPs o rangos extra permitidos, separados por comas |
+| `WORKSPACE_MEMORY` | Memoria máxima del contenedor (por defecto `4g`) |
+| `WORKSPACE_CPUS` | Núcleos máximos del contenedor (por defecto `2`) |
 
 Aplicar cambios:
 
@@ -159,7 +179,28 @@ docker compose up -d                       # LM Studio
 docker compose --profile llamacpp up -d    # llama.cpp
 ```
 
-## 9. Actualizar, parar y borrar
+## 9. Seguridad
+
+| Medida | Efecto |
+|---|---|
+| Cortafuegos de salida | El contenedor solo puede conectarse a los destinos permitidos. El resto se rechaza |
+| Arranque seguro | Si el cortafuegos no se aplica, el contenedor no arranca |
+| Usuario sin privilegios | Claude Code y OpenCode se ejecutan como `node`, sin permisos de administrador |
+| Contenedor endurecido | Sin capacidades de Linux salvo las mínimas, sin escalada de privilegios, con límites de memoria, CPU y procesos |
+| Aislamiento de archivos | Los agentes solo ven `/workspace` y su carpeta personal, no el disco de Windows |
+| Puertos locales | Los servidores de desarrollo solo son accesibles desde el propio PC |
+
+Destinos permitidos por defecto: Anthropic y Claude, npm, GitHub, OpenCode, VS Code, el modelo local (LM Studio o llama.cpp) y DNS.
+
+Para permitir otros destinos (por ejemplo, la API de un proyecto o un CDN de paquetes):
+
+```
+FIREWALL_ALLOW=api.miproyecto.com,cdn.jsdelivr.net
+```
+
+Y aplicar con `.\iniciar.cmd`. Las direcciones se resuelven al arrancar: si un servicio cambia de IP y deja de conectar, reiniciar con `.\iniciar.cmd`.
+
+## 10. Actualizar, parar y borrar
 
 | Tarea | Comando |
 |---|---|
@@ -172,7 +213,7 @@ docker compose --profile llamacpp up -d    # llama.cpp
 
 Los proyectos de `/workspace` viven en un volumen de Docker: subir los cambios con git antes de borrar.
 
-## 10. Solución de problemas
+## 11. Solución de problemas
 
 | Problema | Solución |
 |---|---|
@@ -186,3 +227,6 @@ Los proyectos de `/workspace` viven en un volumen de Docker: subir los cambios c
 | Memoria insuficiente en llama.cpp | Bajar `LLAMACPP_CTX`, activar `LLAMACPP_CPU_MOE` o usar una cuantización menor |
 | El modelo local no usa herramientas o se corta | Subir el contexto a 32768 o usar un modelo mayor |
 | `entrypoint.sh: no such file` | `docker compose build --no-cache` |
+| El entorno no arranca (`dependency failed` o `unhealthy`) | Ver el motivo con `docker compose logs workspace` |
+| Una herramienta no conecta (`Connection refused`, `EHOSTUNREACH`) | El cortafuegos bloquea ese destino: añadirlo a `FIREWALL_ALLOW` |
+| VS Code no termina de abrir el contenedor | Añadir a `FIREWALL_ALLOW` el dominio que aparezca en el registro de *Dev Containers* |
