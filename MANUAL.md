@@ -15,7 +15,7 @@
 
 | Requisito | Notas |
 |---|---|
-| Windows 10 22H2 o Windows 11 | Con la virtualización activada en la BIOS |
+| Windows 10 22H2 o Windows 11 23H2 (Home o Pro) | Con la virtualización activada en la BIOS. Detalle en [INSTALACION.md](INSTALACION.md#requisitos) |
 | WSL2 | `wsl --install` en PowerShell como administrador y reiniciar |
 | Docker Desktop | Con *Use WSL 2 based engine* activado |
 | Cuenta de Claude o clave de API | Para Claude Code |
