@@ -1,48 +1,30 @@
 #!/usr/bin/env bash
-# Menú para elegir agente y modelo.  Uso: ia            (menú)
-#                                         ia <número>   (directo, p. ej. "ia 4")
-#
-# El modelo local puede servirlo LM Studio (Windows) o llama.cpp (Docker): los dos exponen
-#   <LOCAL_URL>/v1/...        compatible con OpenAI     → OpenCode
-#   <LOCAL_URL>/v1/messages   compatible con Anthropic  → Claude Code
 set -euo pipefail
 
 LOCAL_URL="${LOCAL_URL:-http://host.docker.internal:1234}"
 LOCAL_MODEL="${LOCAL_MODEL:-}"
 
-# --- utilidades -------------------------------------------------------------
-
 local_models() { curl -sf --max-time 5 "$LOCAL_URL/v1/models" | jq -r '.data[].id'; }
 
 need_local_model() {
-  if ! curl -sf --max-time 5 "$LOCAL_URL/v1/models" >/dev/null; then
-    cat <<EOF
-No hay servidor de modelos en $LOCAL_URL.
-  · LM Studio: pestaña Developer → Start Server (puerto 1234). Si sigue sin responder,
-    activa "Serve on Local Network" en la configuración del servidor.
-  · llama.cpp: puede estar descargando o cargando el modelo. Míralo desde Windows con
-    docker compose logs -f llamacpp
-EOF
-    exit 1
-  fi
+  curl -sf --max-time 5 "$LOCAL_URL/v1/models" >/dev/null \
+    || { echo "Sin servidor de modelos en $LOCAL_URL"; exit 1; }
   if [ -z "$LOCAL_MODEL" ]; then
     LOCAL_MODEL="$(local_models | grep -viE 'embed' | head -1)"
-    [ -n "$LOCAL_MODEL" ] || { echo "El servidor no tiene ningún modelo cargado. Carga uno en LM Studio."; exit 1; }
+    [ -n "$LOCAL_MODEL" ] || { echo "No hay ningún modelo cargado"; exit 1; }
   elif ! local_models | grep -qxF "$LOCAL_MODEL"; then
-    echo "El modelo '$LOCAL_MODEL' no está en el servidor. Disponibles:"; local_models | sed 's/^/  - /'; exit 1
+    echo "Modelo '$LOCAL_MODEL' no disponible"; exit 1
   fi
-  echo "Modelo local: $LOCAL_MODEL"
 }
 
 need_api_key() {
-  [ -n "${ANTHROPIC_API_KEY:-}" ] || { echo "Falta ANTHROPIC_API_KEY en .env (y después: docker compose up -d)"; exit 1; }
+  [ -n "${ANTHROPIC_API_KEY:-}" ] || { echo "Falta ANTHROPIC_API_KEY en .env"; exit 1; }
 }
 
-# Configuración de OpenCode generada a partir de .env (una sola fuente de verdad)
 write_opencode_config() {
   mkdir -p "$HOME/.config/opencode"
   local models='{}'
-  [ -n "$LOCAL_MODEL" ] && models="{\"$LOCAL_MODEL\": {\"name\": \"$LOCAL_MODEL (local)\"}}"
+  [ -n "$LOCAL_MODEL" ] && models="{\"$LOCAL_MODEL\": {\"name\": \"$LOCAL_MODEL\"}}"
   cat > "$HOME/.config/opencode/opencode.json" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",
@@ -58,10 +40,7 @@ write_opencode_config() {
 EOF
 }
 
-# --- opciones ---------------------------------------------------------------
-
 claude_suscripcion() {
-  # Sin variables de API: Claude Code usa el login de la suscripción (se guarda en el volumen "home")
   exec env -u ANTHROPIC_API_KEY -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN claude "$@"
 }
 
@@ -72,7 +51,6 @@ claude_api() {
 
 claude_local() {
   need_local_model
-  echo "Aviso: Claude Code con un modelo local funciona, pero bastante peor que con Claude."
   exec env -u ANTHROPIC_API_KEY \
     ANTHROPIC_BASE_URL="$LOCAL_URL" \
     ANTHROPIC_AUTH_TOKEN=local \
@@ -98,19 +76,10 @@ opencode_api() {
 }
 
 modelos() {
-  echo "Servidor: $LOCAL_URL"
-  if ! curl -sf --max-time 5 "$LOCAL_URL/v1/models" >/dev/null; then echo "No responde."; exit 1; fi
-  echo "Modelos disponibles:"; local_models | sed 's/^/  - /'
-  cat <<EOF
-
-Cambiar de modelo:
-  · LM Studio: descárgalo y cárgalo desde su ventana (pestaña Discover).
-  · llama.cpp: cambia LLAMACPP_HF_REPO en .env y, desde Windows, docker compose --profile llamacpp up -d
-Para fijar uno por defecto: LOCAL_MODEL=<id> en .env y después docker compose up -d
-EOF
+  curl -sf --max-time 5 "$LOCAL_URL/v1/models" >/dev/null \
+    || { echo "Sin servidor de modelos en $LOCAL_URL"; exit 1; }
+  local_models
 }
-
-# --- menú -------------------------------------------------------------------
 
 opcion="${1:-}"
 [ $# -gt 0 ] && shift
@@ -118,23 +87,20 @@ opcion="${1:-}"
 if [ -z "$opcion" ]; then
   cat <<EOF
 
-  Entorno IA · ¿con qué quieres trabajar?        modelo local: ${LOCAL_MODEL:-(automático)}
+  Claude Code
+    1) Suscripción Claude
+    2) API Anthropic
+    3) Modelo local
 
-   Claude Code
-    1) Suscripción Claude (Pro / Max / Team)     ← lo normal
-    2) API de Anthropic (pago por uso)
-    3) Modelo local (LM Studio / llama.cpp)      ← gratis, sin salir del PC (experimental)
+  OpenCode
+    4) Modelo local
+    5) API Anthropic
 
-   OpenCode
-    4) Modelo local (LM Studio / llama.cpp)      ← gratis, sin salir del PC
-    5) API de Anthropic (pago por uso)
-       (la suscripción de Claude no se puede usar en OpenCode: Anthropic lo prohíbe)
-
-    6) Ver modelos locales
+    6) Modelos locales
     0) Salir
 
 EOF
-  read -rp "  Opción: " opcion
+  read -rp "  > " opcion
 fi
 
 case "$opcion" in
@@ -145,5 +111,5 @@ case "$opcion" in
   5) opencode_api "$@" ;;
   6) modelos ;;
   0|"") exit 0 ;;
-  *) echo "Opción no válida: $opcion"; exit 1 ;;
+  *) echo "Opción no válida"; exit 1 ;;
 esac
