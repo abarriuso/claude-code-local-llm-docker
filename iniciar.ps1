@@ -6,6 +6,29 @@ try { $Host.UI.RawUI.WindowTitle = "claude-code-local-llm-docker" } catch { }
 $Moderna = [bool]$env:WT_SESSION
 $Profiles = if ($LlamaCpp) { @("--profile", "llamacpp") } else { @() }
 
+# docker.exe deja la consola en modo "entrada VT" al salir y Read-Host empieza a
+# recibir secuencias de escape (teclas, cambios de foco) como si fueran texto.
+# Por eso docker nunca lee de la consola ($null | docker ... o -RedirectStandardInput)
+# y antes de cada lectura se restaura el modo original de la consola.
+$ModoEntrada = $null
+try {
+    Add-Type -Namespace Win32 -Name Consola -MemberDefinition @'
+[DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int n);
+[DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr h, out uint m);
+[DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr h, uint m);
+'@
+    $m = [uint32]0
+    if ([Win32.Consola]::GetConsoleMode([Win32.Consola]::GetStdHandle(-10), [ref]$m)) { $ModoEntrada = $m }
+} catch { }
+
+function Leer($texto) {
+    if ($null -ne $ModoEntrada) {
+        try { [void][Win32.Consola]::SetConsoleMode([Win32.Consola]::GetStdHandle(-10), $ModoEntrada) } catch { }
+    }
+    try { $Host.UI.RawUI.FlushInputBuffer() } catch { }
+    return Read-Host $texto
+}
+
 function Ok($m)    { Write-Host "   OK  " -ForegroundColor Black -BackgroundColor Green -NoNewline; Write-Host "  $m" }
 function Aviso($m) { Write-Host "   !!  " -ForegroundColor Black -BackgroundColor Yellow -NoNewline; Write-Host "  $m" -ForegroundColor Yellow }
 function Fallo($m) { Write-Host "  ERROR" -ForegroundColor White -BackgroundColor Red -NoNewline; Write-Host "  $m" -ForegroundColor Red }
@@ -45,8 +68,10 @@ function LMStudioActivo {
 function Esperar($texto, [string[]]$argumentos) {
     $log = Join-Path $env:TEMP "claude-code-local-llm-docker.log"
     $err = "$log.err"
+    $vacio = "$log.in"
+    Set-Content $vacio "" -NoNewline
     $p = Start-Process docker -ArgumentList $argumentos -NoNewWindow -PassThru `
-        -RedirectStandardOutput $log -RedirectStandardError $err
+        -RedirectStandardInput $vacio -RedirectStandardOutput $log -RedirectStandardError $err
     $null = $p.Handle
     $reloj = [Diagnostics.Stopwatch]::StartNew()
     $i = 0
@@ -91,7 +116,7 @@ function Menu {
         Banner
         Write-Host ""
         Write-Host "   Comprobando el estado..." -ForegroundColor DarkGray -NoNewline
-        $estado = (docker compose @Profiles exec -T -u node workspace ia --estado 2> $null) -split "\|"
+        $estado = ($null | docker compose @Profiles exec -T -u node workspace ia --estado 2> $null) -split "\|"
         Limpiar
         $modelo = if ($estado.Count -ge 1 -and $estado[0]) { $estado[0] } else { "desconocido" }
         $api    = if ($estado.Count -ge 2 -and $estado[1]) { $estado[1] } else { "desconocido" }
@@ -122,8 +147,9 @@ function Menu {
         Nota "Cada herramienta se abre en una pestaña nueva y este menú sigue aquí,"
         Nota "así puedes usar varias a la vez."
         Write-Host ""
-        $op = Read-Host "   Elige una opción y pulsa Enter"
+        $op = Leer "   Elige una opción y pulsa Enter"
         if ($null -eq $op) { return }
+        if ($op.Trim() -eq "") { continue }
 
         switch ($op.Trim()) {
             "1" { Abrir "Claude Code" @("ia", "1") }
@@ -142,14 +168,14 @@ function Menu {
             }
             "5" {
                 Paso "Modelos disponibles"
-                docker compose @Profiles exec -T -u node workspace ia 5 | ForEach-Object { Nota $_ }
+                $null | docker compose @Profiles exec -T -u node workspace ia 5 | ForEach-Object { Nota $_ }
                 Write-Host ""
-                Read-Host "   Pulsa Enter para volver al menú" | Out-Null
+                Leer "   Pulsa Enter para volver al menú" | Out-Null
             }
             "6" { Abrir "Terminal" @("bash") }
             "7" {
                 Paso "Parando el entorno..."
-                docker compose --profile llamacpp stop *> $null
+                $null | docker compose --profile llamacpp stop *> $null
                 Ok "Entorno parado. Para volver a usarlo, ejecuta iniciar.cmd"
                 return
             }
@@ -168,7 +194,7 @@ function Esperar-Tecla($titulo, $detalle) {
     Aviso $titulo
     Nota $detalle
     Write-Host ""
-    $r = Read-Host "   Pulsa Enter para volver al menú"
+    $r = Leer "   Pulsa Enter para volver al menú"
     if ($null -eq $r) { exit 0 }
 }
 
@@ -192,7 +218,7 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 Ok "Docker instalado"
 
 Paso "2/4  Comprobando Docker Desktop"
-$osType = docker info --format "{{.OSType}}" 2> $null
+$osType = $null | docker info --format "{{.OSType}}" 2> $null
 if ($LASTEXITCODE -ne 0) {
     $exe = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
     if (Test-Path $exe) {
@@ -205,7 +231,7 @@ if ($LASTEXITCODE -ne 0) {
             Write-Host ("`r   {0}    Esperando a Docker Desktop  {1:mm\:ss}" -f (Girar $i), $reloj.Elapsed) -ForegroundColor Cyan -NoNewline
             Start-Sleep -Seconds 2
             $i++
-            $osType = docker info --format "{{.OSType}}" 2> $null
+            $osType = $null | docker info --format "{{.OSType}}" 2> $null
         } while ($LASTEXITCODE -ne 0 -and $reloj.Elapsed.TotalSeconds -lt 240)
         Limpiar
     }
@@ -253,7 +279,7 @@ if ($LlamaCpp) {
         Aviso "LM Studio no responde. Claude Code funciona igual; solo afecta a la opción 3."
         Nota "Para usar un modelo local: abre LM Studio, carga un modelo y pulsa Developer -> Start Server."
     }
-    docker compose --profile llamacpp stop llamacpp *> $null
+    $null | docker compose --profile llamacpp stop llamacpp *> $null
 }
 
 Paso "4/4  Arrancando el entorno"
