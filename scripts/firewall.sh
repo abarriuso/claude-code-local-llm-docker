@@ -18,7 +18,8 @@ DOMAINS=(
   opencode.ai models.dev
   update.code.visualstudio.com vscode.download.prss.microsoft.com marketplace.visualstudio.com
 )
-read -ra EXTRA <<< "${FIREWALL_ALLOW//,/ }"
+ALLOW="${FIREWALL_ALLOW:-}"
+read -ra EXTRA <<< "${ALLOW//,/ }"
 
 iptables -F
 iptables -X
