@@ -1,6 +1,6 @@
 # Entorno IA
 
-Entorno de desarrollo aislado en Docker con **Claude Code** y **OpenCode**, conectables a Claude o a un modelo local.
+Entorno de desarrollo aislado en Docker con **Claude Code**, **OpenCode** y **Hermes Agent**, conectables a Claude o a un modelo local.
 
 ```
 Windows
@@ -8,6 +8,7 @@ Windows
 └─ Docker Desktop                       │
    ├─ workspace ────────────────────────┼──► api.anthropic.com
    │   Claude Code · OpenCode · git · gh · Node 22
+   ├─ hermes ───────────────────────────┤   (opcional)
    └─ llamacpp ── GPU ── :8080 ◄────────┘   (opcional)
 ```
 
@@ -15,6 +16,7 @@ Windows
 |---|---|---|---|
 | **Claude Code** | 1 | 2 | 3 |
 | **OpenCode** | — | 5 | 4 |
+| **Hermes Agent** | Solo Max con créditos extra | ✓ | ✓ (contexto ≥ 65536) |
 
 ## Requisitos
 
@@ -34,7 +36,7 @@ Windows
 | GPU 8–16 GB · 32 GB RAM | Qwen3.6-35B-A3B Q4_K_M (expertos MoE en la CPU) | `unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q4_K_M` + `LLAMACPP_CPU_MOE=true` |
 | GPU 24 GB o más | Qwen3.6-27B Q4_K_M | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` |
 
-Contexto recomendado: 32768.
+Contexto recomendado: 32768 (65536 para Hermes Agent).
 
 ## Instalación
 
@@ -69,6 +71,20 @@ cd <repo> && ia
 - **Editor:** VS Code → *Dev Containers: Attach to Running Container* → `entorno-ia-workspace-1`.
 - **Servidores de desarrollo:** escuchar en `0.0.0.0` y abrir `http://localhost:<puerto>` (3000, 5173, 8080).
 
+## Hermes Agent
+
+```powershell
+docker compose --profile hermes run --rm hermes setup    # primera vez: proveedor y modelo
+docker compose --profile hermes run --rm hermes          # chat
+```
+
+Comparte `/workspace` con el contenedor de trabajo. URL del modelo local en `setup` → *Custom endpoint*:
+
+| Modo | Base URL |
+|---|---|
+| LM Studio | `http://host.docker.internal:1234/v1` |
+| llama.cpp | `http://llamacpp:8080/v1` |
+
 ## Configuración
 
 `.env`:
@@ -91,8 +107,8 @@ Aplicar cambios: `docker compose up -d` (añadir `--profile llamacpp` si se usa 
 | Tarea | Comando |
 |---|---|
 | Actualizar Claude Code y OpenCode | `docker compose build --pull && docker compose up -d` |
-| Actualizar llama.cpp | `docker compose --profile llamacpp pull` |
-| Borrar todo (sesiones, proyectos y modelos) | `docker compose --profile llamacpp down -v` |
+| Actualizar llama.cpp y Hermes Agent | `docker compose --profile llamacpp --profile hermes pull` |
+| Borrar todo (sesiones, proyectos y modelos) | `docker compose --profile llamacpp --profile hermes down -v` |
 
 ## Solución de problemas
 
@@ -103,6 +119,7 @@ Aplicar cambios: `docker compose up -d` (añadir `--profile llamacpp` si se usa 
 | No hay servidor de modelos (llama.cpp) | El modelo aún se está descargando: `docker compose logs -f llamacpp` |
 | `could not select device driver "nvidia"` | Actualizar el driver NVIDIA y Docker Desktop |
 | Memoria insuficiente | Bajar `LLAMACPP_CTX`, activar `LLAMACPP_CPU_MOE` o usar una cuantización menor |
+| Hermes no usa herramientas con el modelo local | Contexto ≥ 65536 (`LLAMACPP_CTX=65536` o en LM Studio) |
 | `entrypoint.sh: no such file` | Finales de línea CRLF: `docker compose build --no-cache` |
 
 ## Licencia

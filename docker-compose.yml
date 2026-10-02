@@ -2,6 +2,7 @@
 #
 #   Modelo local en LM Studio (Windows):     docker compose up -d --build
 #   Modelo local en llama.cpp (Docker+GPU):  docker compose --profile llamacpp up -d --build
+#   Hermes Agent (opcional):                 docker compose --profile hermes run --rm hermes
 #   (iniciar.ps1 hace esto y ajusta LOCAL_URL en .env)
 #
 #   Entrar:  docker compose exec workspace ia
@@ -53,7 +54,23 @@ services:
               count: all
               capabilities: [gpu]
 
+  # Hermes Agent (opcional): docker compose --profile hermes run --rm hermes
+  hermes:
+    image: nousresearch/hermes-agent:stable
+    profiles: ["hermes"]
+    env_file: .env
+    environment:
+      PUID: "1000"                      # mismo usuario que workspace: comparten /workspace
+      PGID: "1000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    working_dir: /workspace
+    volumes:
+      - hermes:/opt/data                # configuración, memoria, skills y sesiones de Hermes
+      - workspace:/workspace
+
 volumes:
   home:
   workspace:
   models:
+  hermes:
