@@ -1,0 +1,59 @@
+# Entorno de trabajo aislado para Docker Desktop (Windows 10/11 con WSL2)
+#
+#   Modelo local en LM Studio (Windows):     docker compose up -d --build
+#   Modelo local en llama.cpp (Docker+GPU):  docker compose --profile llamacpp up -d --build
+#   (iniciar.ps1 hace esto y ajusta LOCAL_URL en .env)
+#
+#   Entrar:  docker compose exec workspace ia
+name: entorno-ia
+
+services:
+  # Entorno de trabajo: aquí se clonan los repos y se ejecutan Claude Code / OpenCode
+  workspace:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DISABLE_AUTOUPDATER: "1"          # Claude Code se actualiza reconstruyendo la imagen
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # para llegar a LM Studio en Windows
+    volumes:
+      - home:/home/node                 # sesiones de Claude/OpenCode/GitHub, git config, claves SSH
+      - workspace:/workspace            # proyectos (volumen de Docker: mucho más rápido que una carpeta de Windows)
+    # Servidores de desarrollo visibles en el navegador de Windows (solo desde este PC).
+    # Ajusta la lista a los puertos que use tu stack.
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:5173:5173"
+      - "127.0.0.1:8080:8080"
+    init: true
+
+  # Alternativa a LM Studio: llama.cpp con GPU NVIDIA dentro de Docker (solo con --profile llamacpp)
+  # Descarga el modelo de Hugging Face la primera vez (ver progreso: docker compose logs -f llamacpp)
+  llamacpp:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    profiles: ["llamacpp"]
+    restart: unless-stopped
+    environment:
+      LLAMA_ARG_HF_REPO: ${LLAMACPP_HF_REPO:-unsloth/Qwen3.5-9B-GGUF:Q4_K_M}
+      LLAMA_ARG_ALIAS: ${LLAMACPP_ALIAS:-modelo-local}
+      LLAMA_ARG_CTX_SIZE: ${LLAMACPP_CTX:-32768}
+      LLAMA_ARG_CPU_MOE: ${LLAMACPP_CPU_MOE:-false}   # true = expertos MoE en la RAM (modelos MoE grandes en GPU pequeña)
+      LLAMA_ARG_MMPROJ_AUTO: "false"                  # sin visión: ahorra VRAM
+      LLAMA_ARG_HOST: 0.0.0.0
+      LLAMA_ARG_PORT: "8080"
+      LLAMA_CACHE: /models
+    volumes:
+      - models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  home:
+  workspace:
+  models:
