@@ -24,6 +24,8 @@
 
 ## 2. Instalación
 
+Instalación completa desde cero (WSL2, Docker Desktop, Git, GPU, LM Studio): [INSTALACION.md](INSTALACION.md).
+
 Con Git:
 
 ```powershell

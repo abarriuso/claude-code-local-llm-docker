@@ -17,4 +17,4 @@ Windows
        volumen: models
 ```
 
-[Manual de uso](MANUAL.md)
+[Instalación](INSTALACION.md) · [Manual de uso](MANUAL.md)
