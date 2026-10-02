@@ -63,19 +63,6 @@ claude_api() {
   exec env -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN claude "$@"
 }
 
-claude_local() {
-  need_local_model
-  exec env -u ANTHROPIC_API_KEY \
-    ANTHROPIC_BASE_URL="$LOCAL_URL" \
-    ANTHROPIC_AUTH_TOKEN=local \
-    ANTHROPIC_DEFAULT_OPUS_MODEL="$LOCAL_MODEL" \
-    ANTHROPIC_DEFAULT_SONNET_MODEL="$LOCAL_MODEL" \
-    ANTHROPIC_DEFAULT_HAIKU_MODEL="$LOCAL_MODEL" \
-    CLAUDE_CODE_ATTRIBUTION_HEADER=0 \
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
-    claude --model "$LOCAL_MODEL" "$@"
-}
-
 opencode_local() {
   need_local_model
   write_opencode_config
@@ -102,7 +89,7 @@ Uso: ia [opción] [argumentos de la herramienta]
 
   ia          menú
   ia 1        Claude Code con la suscripción
-  ia 4 -c     OpenCode con modelo local, continuando la última sesión
+  ia 3 -c     OpenCode con modelo local, continuando la última sesión
 EOF
 }
 
@@ -127,13 +114,12 @@ if [ -z "$opcion" ]; then
   Claude Code
     1) Suscripción Claude
     2) API Anthropic
-    3) Modelo local
 
   OpenCode
-    4) Modelo local
-    5) API Anthropic
+    3) Modelo local
+    4) API Anthropic
 
-    6) Modelos locales
+    5) Modelos locales
     0) Salir
 
 EOF
@@ -143,10 +129,9 @@ fi
 case "$opcion" in
   1) claude_suscripcion "$@" ;;
   2) claude_api "$@" ;;
-  3) claude_local "$@" ;;
-  4) opencode_local "$@" ;;
-  5) opencode_api "$@" ;;
-  6) modelos ;;
+  3) opencode_local "$@" ;;
+  4) opencode_api "$@" ;;
+  5) modelos ;;
   -h|--help|help) ayuda ;;
   0|"") exit 0 ;;
   *) echo "Opción no válida: $opcion"; ayuda; exit 1 ;;

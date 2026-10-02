@@ -1,6 +1,6 @@
 # claude-code-local-llm-docker
 
-Contenedor Docker para Windows con Claude Code y OpenCode, conectables a la suscripción de Claude, a la API de Anthropic o a un modelo local servido por LM Studio o llama.cpp.
+Contenedor Docker para Windows con Claude Code (suscripción o API de Anthropic) y OpenCode (API de Anthropic o modelo local servido por LM Studio o llama.cpp).
 
 ```
 Windows
