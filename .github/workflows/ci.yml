@@ -3,6 +3,11 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+  # Cada lunes se reconstruye y publica la imagen con las últimas versiones
+  # de Claude Code y OpenCode.
+  schedule:
+    - cron: "17 4 * * 1"
 
 permissions:
   contents: read
@@ -23,6 +28,12 @@ jobs:
           $r = Invoke-ScriptAnalyzer -Path ./iniciar.ps1 -Severity Error
           $r | Format-Table
           if ($r) { exit 1 }
+      - name: Versión de la imagen igual en Dockerfile e iniciar.ps1
+        run: |
+          d=$(sed -n 's/^LABEL entorno-ia.version="\(.*\)"/\1/p' Dockerfile)
+          p=$(sed -n 's/^\$VersionImagen = "\(.*\)"/\1/p' iniciar.ps1 | tr -d '\r')
+          echo "Dockerfile=$d iniciar.ps1=$p"
+          test -n "$d" && test "$d" = "$p"
       - name: docker compose config
         run: docker compose --profile llamacpp config -q
 
@@ -43,7 +54,9 @@ jobs:
           docker compose exec -T -u node workspace claude --version
           docker compose exec -T -u node workspace opencode --version
           docker compose exec -T -u node workspace gh --version
+          docker compose exec -T -u node workspace python3 -m venv /tmp/venv
           docker compose exec -T -u node workspace ia -h
+          docker compose exec -T -u node workspace test -s /etc/claude-code/CLAUDE.md
       - name: Usuario sin privilegios
         run: |
           test "$(docker compose exec -T -u node workspace id -u)" = "1000"
@@ -54,11 +67,63 @@ jobs:
       - name: Cortafuegos bloquea lo no permitido
         run: |
           ! docker compose exec -T -u node workspace curl -s --max-time 5 -o /dev/null https://example.com
-      - name: Cortafuegos permite Anthropic, npm y GitHub
+      - name: Cortafuegos permite Anthropic, npm, PyPI y GitHub
         run: |
           docker compose exec -T -u node workspace curl -s --max-time 10 -o /dev/null https://api.anthropic.com
           docker compose exec -T -u node workspace curl -s --max-time 10 -o /dev/null https://registry.npmjs.org
+          docker compose exec -T -u node workspace curl -s --max-time 10 -o /dev/null https://pypi.org
           docker compose exec -T -u node workspace curl -s --max-time 10 -o /dev/null https://github.com
+      - name: Segundo proyecto con sus propios archivos y puertos
+        run: |
+          PROYECTO=prueba PUERTO_3000=3001 PUERTO_5173=5174 PUERTO_8080=8081 \
+            docker compose -p entorno-ia-prueba up -d --wait workspace
+          general=entorno-ia-workspace-1
+          prueba=entorno-ia-prueba-workspace-1
+          test "$(docker port $prueba 3000)" = "127.0.0.1:3001"
+          # Los archivos no se comparten; la carpeta personal (sesiones) sí.
+          docker exec -u node $general sh -c 'echo x > /workspace/marca && echo x > /home/node/marca'
+          ! docker exec -u node $prueba test -e /workspace/marca
+          docker exec -u node $prueba test -e /home/node/marca
+          # Proyecto nuevo con plantilla para los agentes.
+          docker exec -u node -w /workspace $prueba ia preparar
+          docker exec -u node $prueba grep -q '^# prueba' /workspace/CLAUDE.md
+          test "$(docker exec -u node $prueba ia pendiente)" = "cambios sin guardar en git (commit)"
+          # Borrar un proyecto como lo hace iniciar.ps1 no toca lo compartido.
+          docker rm -f $prueba
+          docker volume rm entorno-ia-prueba_workspace
+          docker exec -u node $general test -e /home/node/marca
       - name: Parar
         if: always()
-        run: docker compose down -v
+        run: |
+          docker rm -f entorno-ia-prueba-workspace-1 || true
+          docker compose down -v
+
+  publicar:
+    # Publica la imagen para que iniciar.cmd la descargue en vez de construirla.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Nombre de la imagen
+        id: imagen
+        run: echo "nombre=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      # Sin caché, para que cada publicación lleve las últimas versiones de las herramientas.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          pull: true
+          no-cache: true
+          push: true
+          tags: |
+            ${{ steps.imagen.outputs.nombre }}:latest
+            ${{ steps.imagen.outputs.nombre }}:${{ github.sha }}

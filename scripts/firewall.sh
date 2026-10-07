@@ -14,8 +14,9 @@ DOMAINS=(
   api.anthropic.com console.anthropic.com statsig.anthropic.com
   claude.ai claude.com platform.claude.com
   sentry.io statsig.com
-  registry.npmjs.org
+  registry.npmjs.org pypi.org files.pythonhosted.org
   opencode.ai models.dev
+  api.openai.com openrouter.ai api.githubcopilot.com generativelanguage.googleapis.com
   update.code.visualstudio.com vscode.download.prss.microsoft.com marketplace.visualstudio.com
 )
 ALLOW="${FIREWALL_ALLOW:-}"

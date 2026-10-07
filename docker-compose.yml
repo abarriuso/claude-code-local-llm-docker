@@ -1,7 +1,13 @@
+# Cada proyecto es un proyecto de Compose distinto ("entorno-ia-<nombre>") con su
+# propio contenedor y su propio volumen de código (<proyecto>_workspace).
+# Comparten la imagen, la carpeta personal (sesiones de Claude, OpenCode y GitHub),
+# los modelos y la red, para que llama.cpp sea accesible desde todos.
+# iniciar.ps1 lo gestiona; "docker compose up" sin más arranca el proyecto "general".
 name: entorno-ia
 
 services:
   workspace:
+    image: ${IMAGEN:-ghcr.io/abarriuso/claude-code-local-llm-docker:latest}
     build: .
     restart: unless-stopped
     env_file:
@@ -9,6 +15,9 @@ services:
         required: false
     environment:
       DISABLE_AUTOUPDATER: "1"
+      PROYECTO: ${PROYECTO:-general}
+    labels:
+      entorno-ia: workspace
     cap_drop: [ALL]
     cap_add: [NET_ADMIN, NET_RAW, SETUID, SETGID]
     security_opt:
@@ -22,15 +31,17 @@ services:
       - home:/home/node
       - workspace:/workspace
     ports:
-      - "127.0.0.1:3000:3000"
-      - "127.0.0.1:5173:5173"
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${PUERTO_3000:-3000}:3000"
+      - "127.0.0.1:${PUERTO_5173:-5173}:5173"
+      - "127.0.0.1:${PUERTO_8080:-8080}:8080"
     init: true
 
   llamacpp:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
     profiles: ["llamacpp"]
     restart: unless-stopped
+    labels:
+      entorno-ia: llamacpp
     environment:
       LLAMA_ARG_HF_REPO: ${LLAMACPP_HF_REPO:-unsloth/Qwen3.5-9B-GGUF:Q4_K_M}
       LLAMA_ARG_ALIAS: modelo-local
@@ -50,7 +61,13 @@ services:
               count: all
               capabilities: [gpu]
 
+networks:
+  default:
+    name: entorno-ia_default
+
 volumes:
   home:
+    name: entorno-ia_home
   workspace:
   models:
+    name: entorno-ia_models
