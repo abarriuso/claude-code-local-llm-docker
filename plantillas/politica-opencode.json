@@ -1,5 +1,10 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "/usr/local/share/entorno-ia/ENTORNO.md",
+    "/workspace/AGENTS.md",
+    "/workspace/CLAUDE.md"
+  ],
   "default_agent": "build",
   "permission": {
     "read": {
@@ -22,6 +27,11 @@
     "external_directory": {
       "*": "deny",
       "/tmp/opencode/*": "allow"
+    },
+    "task": {
+      "*": "deny",
+      "general": "allow",
+      "explore": "allow"
     }
   },
   "agent": {
@@ -47,6 +57,11 @@
         "external_directory": {
           "*": "deny",
           "/tmp/opencode/*": "allow"
+        },
+        "task": {
+          "*": "deny",
+          "general": "allow",
+          "explore": "allow"
         }
       }
     },
@@ -72,7 +87,17 @@
         "external_directory": {
           "*": "deny",
           "/tmp/opencode/*": "allow"
+        },
+        "task": {
+          "*": "deny",
+          "general": "allow",
+          "explore": "allow"
         }
+      }
+    },
+    "explore": {
+      "permission": {
+        "edit": "deny"
       }
     }
   }

@@ -57,9 +57,9 @@ need_api_key() {
 
 write_opencode_config() {
   mkdir -p "$HOME/.config/opencode"
-  jq -n --arg url "$LOCAL_URL/v1" --arg model "$LOCAL_MODEL" --arg rules "$PLANTILLAS/ENTORNO.md" '{
+  # Las instrucciones y los permisos vienen de /etc/opencode/opencode.json.
+  jq -n --arg url "$LOCAL_URL/v1" --arg model "$LOCAL_MODEL" '{
     "$schema": "https://opencode.ai/config.json",
-    instructions: [$rules],
     provider: {
       local: {
         npm: "@ai-sdk/openai-compatible",
@@ -82,6 +82,7 @@ claude_autonomo() {
     echo "El modo autónomo no está disponible con el cortafuegos desactivado (FIREWALL=off):"
     echo "Claude podría enviar tus archivos a cualquier sitio sin preguntarte."
     echo "  → Quita FIREWALL=off del archivo .env y vuelve a abrir el proyecto, o usa la opción 1."
+    [ -t 0 ] && read -rp "Pulsa Enter para cerrar " _
     exit 1
   fi
   exec env -u ANTHROPIC_API_KEY -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN \
@@ -94,6 +95,11 @@ claude_api() {
 }
 
 opencode_libre() {
+  if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -s "$SECRETO" ]; then
+    echo "OpenCode se abre sin tu clave de Anthropic: por seguridad solo la recibe si lo"
+    echo "abres desde el menú de iniciar.cmd (opción 3). Los demás proveedores funcionan igual."
+    echo
+  fi
   write_opencode_config
   if [ -n "${ANTHROPIC_API_KEY:-}" ] && [ -n "${CLAUDE_MODEL:-}" ]; then
     exec opencode -m "anthropic/$CLAUDE_MODEL" "$@"
@@ -207,7 +213,9 @@ opcion="${1:-}"
 [ $# -gt 0 ] && shift
 
 if [ -z "$opcion" ]; then
-  api_configurada && api="configurada" || api="sin configurar"
+  if [ -n "${ANTHROPIC_API_KEY:-}" ]; then api="configurada"
+  elif api_configurada; then api="configurada (solo desde el menú de iniciar.cmd)"
+  else api="sin configurar"; fi
   gh="$(gh_user)"
   cat <<EOF
 

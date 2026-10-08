@@ -58,10 +58,20 @@ fi
 # Modelo local (LM Studio, Ollama o llama.cpp): solo su puerto. Ni el resto de
 # puertos del PC ni los contenedores de otros proyectos.
 allow_modelo() {
-  local dir="${LOCAL_URL:-http://host.docker.internal:1234}" host port ips=""
-  dir="${dir#*://}"; dir="${dir%%/*}"
+  local url="${LOCAL_URL:-http://host.docker.internal:1234}" dir host port ips=""
+  dir="${url#*://}"; dir="${dir%%/*}"
+  if [[ $dir == \[* ]]; then
+    echo "[firewall] aviso: el modelo local por IPv6 no está soportado ($url)"
+    return
+  fi
   host="${dir%%:*}"; port="${dir##*:}"
-  [ "$port" != "$dir" ] || port=80
+  if [ "$port" = "$dir" ]; then
+    case "$url" in https://*) port=443 ;; *) port=80 ;; esac
+  fi
+  if ! [[ $port =~ ^[0-9]+$ ]]; then
+    echo "[firewall] aviso: LOCAL_URL no válida ($url)"
+    return
+  fi
   if [[ $host =~ ^[0-9.]+$ ]]; then
     ips=$host
   elif [[ $host == *.* ]]; then
@@ -79,9 +89,17 @@ allow_modelo() {
 }
 
 # El DNS va por el resolvedor de Docker (127.0.0.11, por lo). No se abre el puerto 53
-# hacia fuera: sería un túnel para cualquier protocolo.
+# hacia fuera: sería un túnel para cualquier protocolo. Si en Docker Desktop hay un DNS
+# propio ("dns" en Docker Engine), Docker lo consulta desde el contenedor ("ExtServers"
+# sin host(...) en resolv.conf): solo se abre hacia esos servidores.
+DNS_PROPIOS=$(sed -n 's/^# ExtServers: \[\(.*\)\]$/\1/p' /etc/resolv.conf | tr ' ' '\n' \
+  | grep -E '^[0-9.]+$' || true)
 iptables -A OUTPUT -o lo -j ACCEPT
 iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+for dns in $DNS_PROPIOS; do
+  iptables -A OUTPUT -p udp -d "$dns" --dport 53 -j ACCEPT
+  iptables -A OUTPUT -p tcp -d "$dns" --dport 53 -j ACCEPT
+done
 allow_modelo
 iptables -A OUTPUT -m set --match-set allowed dst -j ACCEPT
 iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
@@ -98,13 +116,19 @@ if curl -s --max-time 5 -o /dev/null https://example.com; then
   echo "[firewall] ERROR: el tráfico no permitido no se bloquea"
   exit 1
 fi
-if [[ ",$ALLOW," != *",1.1.1.1"* ]] && timeout 3 bash -c '</dev/tcp/1.1.1.1/53' 2>/dev/null; then
-  echo "[firewall] ERROR: el puerto 53 hacia fuera no se bloquea"
-  exit 1
-fi
+# Prueba con un servidor DNS público que no esté permitido a propósito.
+for prueba in 1.1.1.1 9.9.9.9; do
+  if ipset test allowed "$prueba" 2>/dev/null || grep -qxF "$prueba" <<<"$DNS_PROPIOS"; then continue; fi
+  if timeout 3 bash -c "</dev/tcp/$prueba/53" 2>/dev/null; then
+    echo "[firewall] ERROR: el puerto 53 hacia fuera no se bloquea"
+    exit 1
+  fi
+  break
+done
 if [ "$dns_antes" = si ] && ! getent hosts api.anthropic.com >/dev/null; then
   echo "[firewall] ERROR: con el cortafuegos activo no se resuelven nombres"
   echo "[firewall]   → Actualiza Docker Desktop (hace falta Docker Engine 26 o posterior)"
+  echo "[firewall]   → Si has puesto un DNS en Docker Desktop (Settings → Docker Engine, \"dns\"), prueba a quitarlo"
   exit 1
 fi
 if ! curl -s --max-time 10 -o /dev/null https://api.anthropic.com; then

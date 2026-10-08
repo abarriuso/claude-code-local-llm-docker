@@ -570,8 +570,13 @@ if (-not (Test-Path $envPath)) {
     Ok "Archivo de configuración (.env)"
 }
 
-$url = if ($LlamaCpp) { "http://llamacpp:8090" } else { "http://host.docker.internal:1234" }
+# LOCAL_URL: LM Studio o llama.cpp según cómo se arranque. Un valor puesto a mano en .env
+# (por ejemplo Ollama: http://host.docker.internal:11434) se respeta.
 $envText = [IO.File]::ReadAllText($envPath, $utf8) -replace "`r`n", "`n"
+$urlActual = ""
+if ($envText -match "(?m)^LOCAL_URL=(.*)$") { $urlActual = $Matches[1].Trim() }
+$urlPorDefecto = @("", "http://host.docker.internal:1234", "http://llamacpp:8080", "http://llamacpp:8090")
+$url = if ($LlamaCpp) { "http://llamacpp:8090" } elseif ($urlPorDefecto -contains $urlActual) { "http://host.docker.internal:1234" } else { $urlActual }
 if ($envText -match "(?m)^LOCAL_URL=") {
     $envText = $envText -replace "(?m)^LOCAL_URL=.*$", "LOCAL_URL=$url"
 } else {
@@ -579,15 +584,30 @@ if ($envText -match "(?m)^LOCAL_URL=") {
     $envText += "LOCAL_URL=$url`n"
 }
 # docker-compose.yml entrega la clave como secreto y Compose exige que la variable exista.
-if ($envText -notmatch "(?m)^ANTHROPIC_API_KEY=") {
+if ($envText -notmatch "(?m)^[ \t]*(export[ \t]+)?ANTHROPIC_API_KEY[ \t]*[=:]") {
     if ($envText.Length -gt 0 -and -not $envText.EndsWith("`n")) { $envText += "`n" }
     $envText += "ANTHROPIC_API_KEY=`n"
 }
 [IO.File]::WriteAllText($envPath, $envText, $utf8)
 
+# La clave solo se toma de .env, no de una variable ANTHROPIC_API_KEY de Windows.
+Remove-Item Env:ANTHROPIC_API_KEY -ErrorAction SilentlyContinue
+# Compose no recrea un contenedor si solo cambia un secreto: una huella de la clave en
+# una etiqueta hace que el proyecto se recree cuando se añade o cambia la clave.
+$clave = "$(@(Dock compose config --environment) | Where-Object { $_ -like 'ANTHROPIC_API_KEY=*' } | Select-Object -First 1)"
+$clave = $clave -replace "^ANTHROPIC_API_KEY=", ""
+$env:CLAVE_HUELLA = ""
+if ($clave) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $env:CLAVE_HUELLA = (-join ($sha.ComputeHash($utf8.GetBytes($clave)) | ForEach-Object { $_.ToString("x2") })).Substring(0, 16)
+}
+
 if ($LlamaCpp) {
     Ok "Modelo local: llama.cpp (dentro de Docker)"
     if (LMStudioActivo) { Aviso "LM Studio también está abierto y puede quitarle memoria de la GPU a llama.cpp" }
+} elseif ($url -ne "http://host.docker.internal:1234") {
+    Ok "Modelo local: $url (definido en .env)"
+    $null | docker compose --profile llamacpp stop llamacpp *> $null
 } else {
     if (LMStudioActivo) { Ok "Modelo local: LM Studio" }
     else { Nota "LM Studio no está abierto: no pasa nada, solo hace falta para 'OpenCode local'." }

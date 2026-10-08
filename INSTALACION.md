@@ -69,7 +69,7 @@ Sin comandos. Tiempo total: unos 20 minutos.
 2. Escribir un nombre corto, por ejemplo `prueba`.
 3. Pulsar Enter para empezar un proyecto vacío (o pegar la dirección de un repositorio de GitHub).
 
-Cada proyecto tiene su propio contenedor: lo que hagan los agentes en uno no afecta a los demás.
+Cada proyecto tiene su propio contenedor, con sus archivos separados de los demás.
 
 ### Paso 5. Iniciar sesión en Claude
 

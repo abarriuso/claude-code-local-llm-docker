@@ -167,6 +167,10 @@ npm run dev -- --host 0.0.0.0 --port 5173     # en el proyecto 1 se abre en http
    docker compose logs -f llamacpp
    ```
 
+### Ollama u otro servidor
+
+Cualquier servidor compatible con la API de OpenAI que corra en Windows. Por ejemplo, Ollama: en `.env`, `LOCAL_URL=http://host.docker.internal:11434`. `iniciar.cmd` respeta ese valor (salvo con `-LlamaCpp`) y el cortafuegos abre solo ese puerto del PC.
+
 ### Modelos recomendados
 
 | GPU | RAM | `LLAMACPP_HF_REPO` | Notas |
@@ -183,12 +187,12 @@ Fichero `.env` en la carpeta del repositorio. Vale para todos los proyectos:
 
 | Variable | Descripción |
 |---|---|
-| `LOCAL_URL` | Servidor del modelo local. Lo fija `iniciar.cmd` |
+| `LOCAL_URL` | Servidor del modelo local. `iniciar.cmd` pone el de LM Studio o el de llama.cpp, salvo que escribas otro (ver [Ollama u otro servidor](#ollama-u-otro-servidor)). Es el único puerto del PC al que llegan los proyectos |
 | `LOCAL_MODEL` | Modelo local a usar. Vacío = el primero disponible |
 | `LLAMACPP_HF_REPO` | Modelo GGUF de Hugging Face (`usuario/repo:cuantización`) |
 | `LLAMACPP_CTX` | Tamaño de contexto (recomendado 32768) |
 | `LLAMACPP_CPU_MOE` | `true` para mantener los expertos MoE en la RAM |
-| `ANTHROPIC_API_KEY` | Clave de API de Anthropic. Solo la reciben las opciones 3 y 8 (ver [Seguridad](#10-seguridad)). La línea tiene que existir aunque esté vacía |
+| `ANTHROPIC_API_KEY` | Clave de API de Anthropic. Solo la reciben las opciones 3 y 8 (ver [Seguridad](#10-seguridad)). Se toma siempre de `.env`, no de las variables de Windows. La línea tiene que existir aunque esté vacía |
 | `CLAUDE_MODEL` | Modelo de Claude con el que arranca OpenCode si hay clave de API. Vacío = elegir con `/models` |
 | `GIT_USER_NAME`, `GIT_USER_EMAIL` | Identidad de git dentro de los proyectos |
 | `FIREWALL` | `on` (por defecto) u `off` |
@@ -209,10 +213,10 @@ Los cambios se aplican al volver a abrir el proyecto desde `iniciar.cmd`. Solo e
 | Usuario sin privilegios | Claude Code y OpenCode se ejecutan como `node`, sin permisos de administrador |
 | Contenedor endurecido | Sin capacidades de Linux salvo las mínimas, sin escalada de privilegios, con límites de memoria, CPU y procesos |
 | Puertos locales | Los servidores de desarrollo solo son accesibles desde el propio PC |
-| Sin acceso entre proyectos ni al PC | Un proyecto no puede conectarse a otro. Del PC solo alcanza el puerto del modelo local (LM Studio, Ollama o llama.cpp) |
-| DNS sin túnel | Los nombres se resuelven con el DNS interno de Docker; no se puede hablar con servidores DNS de fuera |
-| Clave de API protegida | `ANTHROPIC_API_KEY` llega como secreto que solo puede leer root. Solo la reciben las opciones 3 (OpenCode) y 8 (Claude Code con API), mientras están abiertas; ni la terminal, ni VS Code, ni el resto de opciones la ven |
-| Políticas de los agentes | Claude Code y OpenCode traen una configuración gestionada que los repositorios clonados no pueden cambiar: solo se ejecutan los hooks del entorno, los servidores MCP de un repositorio no se activan solos, no se leen archivos `.env`, y OpenCode pide permiso antes de editar o ejecutar comandos |
+| Sin acceso entre proyectos ni al PC | Un proyecto no puede conectarse a otro. Del PC solo alcanza el puerto de `LOCAL_URL` (el modelo local) |
+| Puerto 53 cerrado | Los nombres se resuelven con el DNS de Docker; no se puede usar el puerto 53 como túnel hacia fuera |
+| Clave de API protegida | `ANTHROPIC_API_KEY` llega como secreto que solo puede leer root. Solo la reciben las opciones 3 (OpenCode) y 8 (Claude Code con API). Ni la terminal, ni VS Code, ni el resto de opciones la tienen. Mientras la 3 o la 8 están abiertas, otro programa del mismo proyecto podría leerla |
+| Políticas de los agentes | Claude Code y OpenCode traen una configuración gestionada que los repositorios clonados no pueden cambiar. Claude Code: solo se ejecutan los hooks del entorno, no se usan servidores MCP y no lee archivos `.env` ni credenciales. OpenCode: pide permiso antes de editar o ejecutar comandos, no lee `.env`, e ignora la configuración, los agentes y los plugins que traiga el repositorio (sí lee su `AGENTS.md` y su `CLAUDE.md`) |
 
 Destinos permitidos por defecto: Anthropic y Claude, GitHub, npm, PyPI, OpenCode y los proveedores más comunes (OpenAI, OpenRouter, GitHub Copilot, Google Gemini), VS Code y el modelo local.
 
@@ -222,7 +226,8 @@ Destinos permitidos por defecto: Anthropic y Claude, GitHub, npm, PyPI, OpenCode
 - **Lo que se comparte entre proyectos:** las sesiones (Claude, OpenCode, GitHub), el historial de conversaciones y la configuración de usuario de los agentes viven en la carpeta personal común. Un agente engañado en un proyecto podría dejar ahí algo que afecte a otro.
 - **El token de GitHub** que crea la opción 7 da acceso a todos tus repositorios. En GitHub, protege la rama principal (*Settings → Rules → Rulesets*: bloquear *force push* y borrado).
 - **VS Code conectado a un proyecto** es un puente hacia Windows: no lo uses con repositorios de los que no te fíes ni a la vez que el modo autónomo.
-- **OpenCode** usa el agente seguro por defecto, pero un repositorio puede definir otros agentes en su `opencode.json`: si cambias de agente con `Tab`, revisa cuál eliges.
+- **Consultas DNS.** El DNS de Docker resuelve cualquier nombre, así que un agente engañado podría filtrar datos pequeños escondidos en nombres de dominio.
+- **Servidores MCP desactivados.** Por seguridad, Claude Code no carga ningún servidor MCP, tampoco los que añadas tú. OpenCode tampoco usa los que traiga un repositorio.
 
 Para permitir otros destinos (por ejemplo, la API de un proyecto o un CDN de paquetes):
 
@@ -275,5 +280,7 @@ No uses `docker compose down -v` con el proyecto de un nombre (`-p entorno-ia-�
 | La construcción de la imagen falla | Comprobar la conexión y ejecutar `docker compose build --no-cache workspace` |
 | `environment variable "ANTHROPIC_API_KEY" required by secret … is not set` | Falta la línea `ANTHROPIC_API_KEY=` en `.env` (puede ir vacía). `iniciar.cmd` la añade sola; al usar `docker compose` o VS Code directamente, ejecutar antes `iniciar.cmd` una vez |
 | Aviso `mode is not supported outside Swarm mode` | Es inofensivo: Compose sí aplica ese permiso al secreto de la clave, y el contenedor lo comprueba al arrancar |
-| `con el cortafuegos activo no se resuelven nombres` | Actualizar Docker Desktop (hace falta Docker Engine 26 o posterior) |
+| `con el cortafuegos activo no se resuelven nombres` | Actualizar Docker Desktop (hace falta Docker Engine 26 o posterior). Si en *Settings → Docker Engine* hay un `"dns"` propio, probar a quitarlo |
+| OpenCode dice que se abre sin tu clave de Anthropic | Se ha abierto desde la terminal o VS Code. Para usar la clave, abrirlo desde el menú de `iniciar.cmd` (opción 3) |
+| Un repositorio trae configuración de OpenCode (`opencode.json`, `.opencode/`) y no se aplica | Es a propósito: podría saltarse los permisos o ejecutar código al abrirse. Sus `AGENTS.md` y `CLAUDE.md` sí se leen |
 | La opción 8 dice que la clave solo se entrega a las opciones que la usan | Se ha abierto `ia claude-api` desde la terminal. Abrirla desde el menú de `iniciar.cmd` |

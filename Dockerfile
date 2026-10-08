@@ -30,7 +30,11 @@ RUN sed -i 's/\r$//' /usr/local/bin/ia /usr/local/bin/entrypoint.sh /usr/local/b
  && cp /usr/local/share/entorno-ia/politica-opencode.json /etc/opencode/opencode.json \
  && mkdir -p /workspace && chown node:node /workspace
 
-ENV HOME=/home/node
+# OpenCode no carga la configuración, los agentes ni los plugins que traiga el
+# repositorio: podrían saltarse /etc/opencode/opencode.json o ejecutar código al abrirlo.
+# Las instrucciones del proyecto (AGENTS.md, CLAUDE.md) sí se leen desde esa política.
+ENV HOME=/home/node \
+    OPENCODE_DISABLE_PROJECT_CONFIG=1
 WORKDIR /workspace
 
 HEALTHCHECK --interval=5s --timeout=3s --start-period=60s --retries=3 CMD ["test", "-f", "/run/firewall-ready"]

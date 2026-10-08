@@ -30,6 +30,9 @@ services:
         mode: 0400
     labels:
       entorno-ia: workspace
+      # Huella de la clave (la calcula iniciar.ps1): si la clave cambia, el contenedor
+      # se recrea y recibe la nueva. Compose no lo hace solo con un cambio de secreto.
+      entorno-ia.clave: ${CLAVE_HUELLA:-}
     cap_drop: [ALL]
     cap_add: [NET_ADMIN, NET_RAW, SETUID, SETGID]
     security_opt:
@@ -63,6 +66,12 @@ services:
       LLAMA_ARG_HOST: 0.0.0.0
       LLAMA_ARG_PORT: "8090"
       LLAMA_CACHE: /models
+    # La imagen comprueba el puerto 8080; aquí escucha en el 8090. La primera vez
+    # descarga el modelo, de ahí el margen largo.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      start_period: 10m
     volumes:
       - models:/models
     deploy:
