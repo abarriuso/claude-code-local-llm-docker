@@ -12,15 +12,19 @@ on:
 permissions:
   contents: read
 
+# Las acciones y las imágenes de terceros van fijadas por SHA o digest: una etiqueta
+# se puede reapuntar a código malicioso (tj-actions, trivy-action).
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
       - name: shellcheck
         run: shellcheck -s bash scripts/ia scripts/entrypoint.sh scripts/firewall.sh
       - name: hadolint
-        run: docker run --rm -i hadolint/hadolint hadolint --failure-threshold error - < Dockerfile
+        run: docker run --rm -i hadolint/hadolint:v2.14.0@sha256:27086352fd5e1907ea2b934eb1023f217c5ae087992eb59fde121dce9c9ff21e hadolint --failure-threshold error - < Dockerfile
       - name: PSScriptAnalyzer
         shell: pwsh
         run: |
@@ -34,16 +38,31 @@ jobs:
           p=$(sed -n 's/^\$VersionImagen = "\(.*\)"/\1/p' iniciar.ps1 | tr -d '\r')
           echo "Dockerfile=$d iniciar.ps1=$p"
           test -n "$d" && test "$d" = "$p"
+      - name: Políticas de los agentes en JSON válido
+        run: |
+          jq empty plantillas/politica-claude.json
+          jq empty plantillas/politica-opencode.json
       - name: docker compose config
+        env:
+          ANTHROPIC_API_KEY: ""
         run: docker compose --profile llamacpp config -q
 
   build-and-test:
     runs-on: ubuntu-latest
     needs: lint
+    # packages: write solo se usa en el último paso, para publicar la imagen ya probada.
+    permissions:
+      contents: read
+      packages: write
+    env:
+      # Clave falsa para comprobar que solo la ve quien debe.
+      ANTHROPIC_API_KEY: sk-ant-prueba-ci
     steps:
-      - uses: actions/checkout@v4
-      - name: Build (sin publicar)
-        run: docker compose build workspace
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Build
+        run: docker compose build --pull workspace
       - name: Arrancar y esperar al cortafuegos
         run: docker compose up -d --wait workspace
       - name: Logs
@@ -67,12 +86,51 @@ jobs:
       - name: Cortafuegos bloquea lo no permitido
         run: |
           ! docker compose exec -T -u node workspace curl -s --max-time 5 -o /dev/null https://example.com
+          # El DNS funciona por el resolvedor de Docker, pero el puerto 53 hacia fuera no.
+          docker compose exec -T -u node workspace getent hosts api.anthropic.com
+          ! docker compose exec -T -u node workspace timeout 3 bash -c '</dev/tcp/1.1.1.1/53'
+          ! docker compose exec -T -u node workspace timeout 3 bash -c '</dev/tcp/8.8.8.8/53'
       - name: Cortafuegos permite Anthropic, npm, PyPI y GitHub
         run: |
           docker compose exec -T -u node workspace curl -s --max-time 10 -o /dev/null https://api.anthropic.com
           docker compose exec -T -u node workspace curl -s --max-time 10 -o /dev/null https://registry.npmjs.org
           docker compose exec -T -u node workspace curl -s --max-time 10 -o /dev/null https://pypi.org
           docker compose exec -T -u node workspace curl -s --max-time 10 -o /dev/null https://github.com
+      - name: La clave de API solo la puede leer root
+        run: |
+          test "$(docker compose exec -T workspace stat -c %U:%a /run/secrets/anthropic_api_key)" = "root:400"
+          test -z "$(docker compose exec -T -u node workspace printenv ANTHROPIC_API_KEY)"
+          ! docker compose exec -T -u node workspace cat /run/secrets/anthropic_api_key
+          ! docker compose exec -T -u node workspace sh -c 'grep -a -l sk-ant-prueba-ci /proc/*/environ'
+          docker compose exec -T -u node workspace ia --estado | grep -q '|configurada|'
+          docker compose exec -T workspace ia claude-api --version
+      - name: Políticas de Claude Code y OpenCode
+        run: |
+          docker compose exec -T workspace test -s /etc/claude-code/managed-settings.json
+          docker compose exec -T -u node -w /workspace workspace opencode debug agent build 2>/dev/null > agente.json
+          python3 - agente.json <<'EOF'
+          import json, re, sys
+          reglas = json.load(open(sys.argv[1]))["permission"]
+          def coincide(patron, texto):
+              return re.fullmatch("".join(".*" if c == "*" else "." if c == "?" else re.escape(c) for c in patron), texto) is not None
+          def accion(permiso, objetivo):
+              resultado = None
+              for r in reglas:
+                  if coincide(r["permission"], permiso) and coincide(r["pattern"], objetivo):
+                      resultado = r["action"]
+              return resultado
+          esperado = {
+              ("edit", "/workspace/app.js"): "ask",
+              ("bash", "rm -rf /workspace"): "ask",
+              ("bash", "git status"): "allow",
+              ("read", "/workspace/.env"): "deny",
+              ("external_directory", "/etc/*"): "deny",
+          }
+          fallos = [(k, accion(*k), v) for k, v in esperado.items() if accion(*k) != v]
+          for f in fallos:
+              print("OpenCode: %s es %s, se esperaba %s" % f)
+          sys.exit(1 if fallos else 0)
+          EOF
       - name: Segundo proyecto con sus propios archivos y puertos
         run: |
           PROYECTO=prueba PUERTO_3000=3001 PUERTO_5173=5174 PUERTO_8080=8081 \
@@ -84,6 +142,11 @@ jobs:
           docker exec -u node $general sh -c 'echo x > /workspace/marca && echo x > /home/node/marca'
           ! docker exec -u node $prueba test -e /workspace/marca
           docker exec -u node $prueba test -e /home/node/marca
+          # Un servidor de desarrollo se abre desde el PC, pero no desde otro proyecto.
+          docker exec -d -u node -w /workspace $general python3 -m http.server 8080 --bind 0.0.0.0
+          sleep 2
+          curl -sf --max-time 5 -o /dev/null http://127.0.0.1:8080
+          ! docker exec -u node $prueba curl -s --max-time 5 -o /dev/null http://$general:8080
           # Proyecto nuevo con plantilla para los agentes.
           docker exec -u node -w /workspace $prueba ia preparar
           docker exec -u node $prueba grep -q '^# prueba' /workspace/CLAUDE.md
@@ -92,38 +155,23 @@ jobs:
           docker rm -f $prueba
           docker volume rm entorno-ia-prueba_workspace
           docker exec -u node $general test -e /home/node/marca
+      # Se publica exactamente la imagen que ha pasado las pruebas, para que
+      # iniciar.cmd la descargue en vez de construirla.
+      - name: Publicar la imagen probada
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          probada=$(docker compose config --images | grep -v llama)
+          nombre="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for etiqueta in "$GITHUB_SHA" latest; do
+            docker tag "$probada" "$nombre:$etiqueta"
+            docker push "$nombre:$etiqueta"
+          done
+          docker logout ghcr.io
       - name: Parar
         if: always()
         run: |
           docker rm -f entorno-ia-prueba-workspace-1 || true
           docker compose down -v
-
-  publicar:
-    # Publica la imagen para que iniciar.cmd la descargue en vez de construirla.
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Nombre de la imagen
-        id: imagen
-        run: echo "nombre=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-      # Sin caché, para que cada publicación lleve las últimas versiones de las herramientas.
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          pull: true
-          no-cache: true
-          push: true
-          tags: |
-            ${{ steps.imagen.outputs.nombre }}:latest
-            ${{ steps.imagen.outputs.nombre }}:${{ github.sha }}

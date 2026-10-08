@@ -8,7 +8,7 @@ $Profiles = if ($LlamaCpp) { @("--profile", "llamacpp") } else { @() }
 $utf8 = New-Object Text.UTF8Encoding $false
 
 # Debe coincidir con LABEL entorno-ia.version del Dockerfile.
-$VersionImagen = "2"
+$VersionImagen = "3"
 # Cada proyecto es el proyecto de Compose "entorno-ia-<nombre>"; "general" es "entorno-ia".
 $Prefijo = "entorno-ia"
 $NombreValido = '^[a-z][a-z0-9-]{0,29}$'
@@ -196,8 +196,11 @@ function Encender($p) {
     return $ok
 }
 
-function Abrir($p, $titulo, [string[]]$comando) {
-    $exec = @("exec", "-it", "-u", "node", "-w", "/workspace", (Contenedor $p)) + $comando
+# -ComoRoot solo para "ia claude-api" e "ia opencode": la clave de API solo la puede leer
+# root, e "ia" se la pasa a esa herramienta y baja enseguida al usuario node.
+function Abrir($p, $titulo, [string[]]$comando, [switch]$ComoRoot) {
+    $usuario = if ($ComoRoot) { "root" } else { "node" }
+    $exec = @("exec", "-it", "-u", $usuario, "-w", "/workspace", (Contenedor $p)) + $comando
     if (Get-Command wt.exe -ErrorAction SilentlyContinue) {
         & wt.exe -w 0 new-tab --title "$titulo ($p)" -d $PSScriptRoot docker @exec
         Ok "$titulo abierto en una pestaña nueva de esta ventana"
@@ -274,7 +277,7 @@ function MenuProyecto($p) {
 
         Seccion "TRABAJAR CON IA"
         Opcion 1 "Claude Code"          "Con tu cuenta de Claude (Pro, Max o Team)"
-        Opcion 2 "Claude Code autónomo" "No pide permiso en cada paso. Seguro: el proyecto está aislado"
+        Opcion 2 "Claude Code autónomo" "No pide permiso. Solo con proyectos y repositorios de confianza"
         Opcion 3 "OpenCode"             "Eliges proveedor y modelo dentro, también gratuitos"
         Opcion 4 "OpenCode local"       "Con tu modelo de LM Studio o llama.cpp. Gratis y privado"
         Seccion "HERRAMIENTAS"
@@ -296,7 +299,7 @@ function MenuProyecto($p) {
             ""  { }
             "1" { Abrir $p "Claude Code" @("ia", "claude") }
             "2" { Abrir $p "Claude Code autónomo" @("ia", "auto") }
-            "3" { Abrir $p "OpenCode" @("ia", "opencode") }
+            "3" { Abrir $p "OpenCode" @("ia", "opencode") -ComoRoot }
             "4" {
                 if ($hayModelo) { Abrir $p "OpenCode local" @("ia", "local") }
                 elseif ($LlamaCpp) { Esperar-Tecla "El modelo local aún no está listo" "llama.cpp puede estar descargando el modelo. Míralo con: docker compose logs -f llamacpp" }
@@ -310,7 +313,7 @@ function MenuProyecto($p) {
                 Leer "   Pulsa Enter para volver al menú" | Out-Null
             }
             "8" {
-                if ($hayApi) { Abrir $p "Claude Code (API)" @("ia", "claude-api") }
+                if ($hayApi) { Abrir $p "Claude Code (API)" @("ia", "claude-api") -ComoRoot }
                 else { Esperar-Tecla "Falta la clave de API" "Añade ANTHROPIC_API_KEY=tu-clave en el archivo .env de esta carpeta y vuelve a ejecutar iniciar.cmd." }
             }
             "9" {
@@ -567,13 +570,18 @@ if (-not (Test-Path $envPath)) {
     Ok "Archivo de configuración (.env)"
 }
 
-$url = if ($LlamaCpp) { "http://llamacpp:8080" } else { "http://host.docker.internal:1234" }
+$url = if ($LlamaCpp) { "http://llamacpp:8090" } else { "http://host.docker.internal:1234" }
 $envText = [IO.File]::ReadAllText($envPath, $utf8) -replace "`r`n", "`n"
 if ($envText -match "(?m)^LOCAL_URL=") {
     $envText = $envText -replace "(?m)^LOCAL_URL=.*$", "LOCAL_URL=$url"
 } else {
     if ($envText.Length -gt 0 -and -not $envText.EndsWith("`n")) { $envText += "`n" }
     $envText += "LOCAL_URL=$url`n"
+}
+# docker-compose.yml entrega la clave como secreto y Compose exige que la variable exista.
+if ($envText -notmatch "(?m)^ANTHROPIC_API_KEY=") {
+    if ($envText.Length -gt 0 -and -not $envText.EndsWith("`n")) { $envText += "`n" }
+    $envText += "ANTHROPIC_API_KEY=`n"
 }
 [IO.File]::WriteAllText($envPath, $envText, $utf8)
 

@@ -15,7 +15,7 @@ Windows
    │    usuario sin privilegios · cortafuegos de salida ─────┼──► Anthropic, GitHub, npm, PyPI
    │                                                         │
    ├─ compartido: sesiones (Claude, OpenCode, GitHub) y modelos
-   └─ llamacpp (opcional) ── GPU ── :8080 ◄──────────────────┘
+   └─ llamacpp (opcional) ── GPU ── :8090 ◄──────────────────┘
 ```
 
 ## Empezar

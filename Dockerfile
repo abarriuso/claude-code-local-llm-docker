@@ -2,7 +2,7 @@ FROM node:22-bookworm-slim
 
 # Versión de la imagen. iniciar.ps1 la compara con la suya y, si no coincide,
 # descarga o reconstruye la imagen. Súbela cuando cambie algo de esta imagen.
-LABEL entorno-ia.version="2"
+LABEL entorno-ia.version="3"
 LABEL org.opencontainers.image.source="https://github.com/abarriuso/claude-code-local-llm-docker"
 
 RUN apt-get update \
@@ -24,8 +24,10 @@ COPY plantillas/ /usr/local/share/entorno-ia/
 RUN sed -i 's/\r$//' /usr/local/bin/ia /usr/local/bin/entrypoint.sh /usr/local/bin/firewall.sh \
       /usr/local/share/entorno-ia/* \
  && chmod +x /usr/local/bin/ia /usr/local/bin/entrypoint.sh /usr/local/bin/firewall.sh \
- && mkdir -p /etc/claude-code \
+ && mkdir -p /etc/claude-code /etc/opencode \
  && cp /usr/local/share/entorno-ia/ENTORNO.md /etc/claude-code/CLAUDE.md \
+ && cp /usr/local/share/entorno-ia/politica-claude.json /etc/claude-code/managed-settings.json \
+ && cp /usr/local/share/entorno-ia/politica-opencode.json /etc/opencode/opencode.json \
  && mkdir -p /workspace && chown node:node /workspace
 
 ENV HOME=/home/node

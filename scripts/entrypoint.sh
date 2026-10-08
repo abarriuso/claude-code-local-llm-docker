@@ -3,6 +3,16 @@ set -euo pipefail
 
 /usr/local/bin/firewall.sh
 
+# La clave de API solo la puede leer root (ver docker-compose.yml y scripts/ia).
+SECRETO=/run/secrets/anthropic_api_key
+if [ -e "$SECRETO" ]; then
+  chmod 0400 "$SECRETO" || true
+  if [ "$(stat -c %u%a "$SECRETO")" != "0400" ]; then
+    echo "[entorno] ERROR: la clave de API sería legible por los agentes ($SECRETO)"
+    exit 1
+  fi
+fi
+
 as_node() { setpriv --reuid=node --regid=node --init-groups -- "$@"; }
 
 # La carpeta personal se comparte entre proyectos: si dos contenedores arrancan

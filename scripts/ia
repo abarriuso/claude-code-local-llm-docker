@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SECRETO=/run/secrets/anthropic_api_key
+
+# La clave de API solo la puede leer root. iniciar.cmd abre como root las opciones que
+# la usan; aquí se lee y se pasa únicamente a esa herramienta, ya como usuario node.
 if [ "$(id -u)" = 0 ]; then
+  case "${1:-}" in
+    3|opencode|6|claude-api)
+      if [ -s "$SECRETO" ]; then ANTHROPIC_API_KEY="$(cat "$SECRETO")"; export ANTHROPIC_API_KEY; fi ;;
+  esac
   exec setpriv --reuid=node --regid=node --init-groups -- "$0" "$@"
 fi
 
@@ -33,10 +41,17 @@ need_local_model() {
   fi
 }
 
+api_configurada() { [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -s "$SECRETO" ]; }
+
 need_api_key() {
   [ -n "${ANTHROPIC_API_KEY:-}" ] && return
-  echo "Falta ANTHROPIC_API_KEY"
-  echo "  → Añádela en el archivo .env y vuelve a ejecutar iniciar.cmd"
+  if [ -s "$SECRETO" ]; then
+    echo "La clave de API está configurada, pero por seguridad solo se entrega a las"
+    echo "opciones que la usan. Ábrela desde el menú de iniciar.cmd (opción 8)."
+  else
+    echo "Falta ANTHROPIC_API_KEY"
+    echo "  → Añádela en el archivo .env y vuelve a ejecutar iniciar.cmd"
+  fi
   exit 1
 }
 
@@ -64,10 +79,10 @@ claude_suscripcion() {
 
 claude_autonomo() {
   if [ "${FIREWALL:-on}" = "off" ]; then
-    echo "El cortafuegos está desactivado (FIREWALL=off)."
-    echo "Sin él, el modo autónomo puede conectarse a cualquier sitio sin preguntarte."
-    read -rp "¿Seguir de todos modos? (s/N) " r
-    [[ $r == [sS] ]] || exit 1
+    echo "El modo autónomo no está disponible con el cortafuegos desactivado (FIREWALL=off):"
+    echo "Claude podría enviar tus archivos a cualquier sitio sin preguntarte."
+    echo "  → Quita FIREWALL=off del archivo .env y vuelve a abrir el proyecto, o usa la opción 1."
+    exit 1
   fi
   exec env -u ANTHROPIC_API_KEY -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN \
     claude --dangerously-skip-permissions "$@"
@@ -177,7 +192,7 @@ Uso: ia [comando] [argumentos para la herramienta]
 
   ia               menú
   ia claude        Claude Code con tu cuenta de Claude
-  ia auto          Claude Code autónomo (no pide permiso en cada paso)
+  ia auto          Claude Code autónomo (no pide permiso; solo con proyectos de confianza)
   ia opencode      OpenCode: eliges proveedor y modelo dentro (/models, /connect)
   ia local         OpenCode con el modelo local (LM Studio o llama.cpp)
   ia claude-api    Claude Code con ANTHROPIC_API_KEY
@@ -192,7 +207,7 @@ opcion="${1:-}"
 [ $# -gt 0 ] && shift
 
 if [ -z "$opcion" ]; then
-  [ -n "${ANTHROPIC_API_KEY:-}" ] && api="configurada" || api="sin configurar"
+  api_configurada && api="configurada" || api="sin configurar"
   gh="$(gh_user)"
   cat <<EOF
 
@@ -201,7 +216,7 @@ if [ -z "$opcion" ]; then
 
   TRABAJAR CON IA
     1) Claude Code             con tu cuenta de Claude
-    2) Claude Code autónomo    no pide permiso en cada paso
+    2) Claude Code autónomo    no pide permiso; solo con proyectos de confianza
     3) OpenCode                eliges proveedor y modelo dentro
     4) OpenCode local          con el modelo de LM Studio o llama.cpp
 
@@ -226,7 +241,7 @@ case "$opcion" in
   preparar)       preparar "$@" ;;
   pendiente)      pendiente ;;
   --estado)
-    [ -n "${ANTHROPIC_API_KEY:-}" ] && api="configurada" || api="sin configurar"
+    api_configurada && api="configurada" || api="sin configurar"
     echo "$(estado_local)|$api|$(gh_user)" ;;
   -h|--help|help) ayuda ;;
   0|"") exit 0 ;;

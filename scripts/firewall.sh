@@ -10,10 +10,11 @@ if [ "${FIREWALL:-on}" = "off" ]; then
   exit 0
 fi
 
+# Sin telemetría (statsig, sentry): Claude Code no la envía con
+# CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC y cada destino abierto es una vía de salida.
 DOMAINS=(
-  api.anthropic.com console.anthropic.com statsig.anthropic.com
+  api.anthropic.com console.anthropic.com
   claude.ai claude.com platform.claude.com
-  sentry.io statsig.com
   registry.npmjs.org pypi.org files.pythonhosted.org
   opencode.ai models.dev
   api.openai.com openrouter.ai api.githubcopilot.com generativelanguage.googleapis.com
@@ -21,6 +22,10 @@ DOMAINS=(
 )
 ALLOW="${FIREWALL_ALLOW:-}"
 read -ra EXTRA <<< "${ALLOW//,/ }"
+
+# Para distinguir "sin internet" de "el cortafuegos rompe el DNS" al final.
+dns_antes=no
+if getent hosts api.anthropic.com >/dev/null; then dns_antes=si; fi
 
 iptables -F
 iptables -X
@@ -50,15 +55,34 @@ else
   echo "[firewall] aviso: no se pudieron obtener las direcciones de GitHub"
 fi
 
-allow host.docker.internal
-for net in $(ip -o -f inet addr show | awk '$2 != "lo" {print $4}'); do
-  ipset add -exist allowed "$net"
-done
+# Modelo local (LM Studio, Ollama o llama.cpp): solo su puerto. Ni el resto de
+# puertos del PC ni los contenedores de otros proyectos.
+allow_modelo() {
+  local dir="${LOCAL_URL:-http://host.docker.internal:1234}" host port ips=""
+  dir="${dir#*://}"; dir="${dir%%/*}"
+  host="${dir%%:*}"; port="${dir##*:}"
+  [ "$port" != "$dir" ] || port=80
+  if [[ $host =~ ^[0-9.]+$ ]]; then
+    ips=$host
+  elif [[ $host == *.* ]]; then
+    ips=$(getent ahostsv4 "$host" | awk '{print $1}' | sort -u || true)
+  fi
+  if [ -n "$ips" ]; then
+    for ip in $ips; do iptables -A OUTPUT -p tcp -d "$ip" --dport "$port" -j ACCEPT; done
+  else
+    # Otro contenedor (llamacpp): su IP cambia al reiniciarse, así que se permite
+    # ese puerto en la red de Docker.
+    for net in $(ip -o -f inet addr show | awk '$2 != "lo" {print $4}'); do
+      iptables -A OUTPUT -p tcp -d "$net" --dport "$port" -j ACCEPT
+    done
+  fi
+}
 
+# El DNS va por el resolvedor de Docker (127.0.0.11, por lo). No se abre el puerto 53
+# hacia fuera: sería un túnel para cualquier protocolo.
 iptables -A OUTPUT -o lo -j ACCEPT
-iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
-iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
 iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+allow_modelo
 iptables -A OUTPUT -m set --match-set allowed dst -j ACCEPT
 iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
 iptables -P OUTPUT DROP
@@ -72,6 +96,15 @@ fi
 
 if curl -s --max-time 5 -o /dev/null https://example.com; then
   echo "[firewall] ERROR: el tráfico no permitido no se bloquea"
+  exit 1
+fi
+if [[ ",$ALLOW," != *",1.1.1.1"* ]] && timeout 3 bash -c '</dev/tcp/1.1.1.1/53' 2>/dev/null; then
+  echo "[firewall] ERROR: el puerto 53 hacia fuera no se bloquea"
+  exit 1
+fi
+if [ "$dns_antes" = si ] && ! getent hosts api.anthropic.com >/dev/null; then
+  echo "[firewall] ERROR: con el cortafuegos activo no se resuelven nombres"
+  echo "[firewall]   → Actualiza Docker Desktop (hace falta Docker Engine 26 o posterior)"
   exit 1
 fi
 if ! curl -s --max-time 10 -o /dev/null https://api.anthropic.com; then
