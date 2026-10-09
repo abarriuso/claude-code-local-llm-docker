@@ -123,7 +123,7 @@ modelos() {
 github() {
   local u r
   u="$(gh_user)"
-  if [ -n "$u" ] && gh auth status -h github.com >/dev/null 2>&1; then
+  if [ "${1:-}" != "--de-nuevo" ] && [ -n "$u" ] && gh auth status -h github.com >/dev/null 2>&1; then
     echo "Este proyecto ya está conectado a GitHub como $u."
     read -rp "¿Conectar de nuevo? (s/N) " r
     [[ $r == [sS] ]] || return 0
@@ -205,31 +205,37 @@ preparar() {
   fi
 }
 
-# Copia las sesiones de otro proyecto (solo las credenciales: ni hooks, ni ajustes, ni
-# la confianza en carpetas). iniciar.ps1 lo ejecuta en un contenedor sin red con la
-# carpeta personal del otro proyecto montada en $1.
+# Copia de otro proyecto lo que se puede compartir sin riesgo: las claves de API de
+# OpenCode y, solo si se pide (--con-github), la conexión con GitHub. El inicio de sesión
+# de Claude no se copia: su token se renueva y la copia dejaría de valer en uno de los
+# dos proyectos. iniciar.ps1 lo ejecuta en un contenedor sin red con la carpeta personal
+# del otro proyecto montada en $1.
 importar_sesion() {
-  local origen="${1:?}" f
-  for f in .claude/.credentials.json .config/gh/hosts.yml .local/share/opencode/auth.json; do
-    [ -f "$origen/$f" ] || continue
-    mkdir -p "$HOME/$(dirname "$f")"
-    install -m 600 "$origen/$f" "$HOME/$f"
-    echo "  copiado: ~/$f"
-  done
-  # Datos de la cuenta de Claude (sin la lista de carpetas de confianza ni MCP).
-  if [ -f "$origen/.claude.json" ]; then
-    jq '{oauthAccount, userID, hasCompletedOnboarding, lastOnboardingVersion, theme}
-        | with_entries(select(.value != null))' "$origen/.claude.json" > "$HOME/.claude.json.nuevo"
-    if [ -f "$HOME/.claude.json" ]; then
-      jq -s '.[0] * .[1]' "$HOME/.claude.json" "$HOME/.claude.json.nuevo" > "$HOME/.claude.json.mezcla"
-      mv "$HOME/.claude.json.mezcla" "$HOME/.claude.json"
-      rm -f "$HOME/.claude.json.nuevo"
-    else
-      mv "$HOME/.claude.json.nuevo" "$HOME/.claude.json"
+  local origen="${1:?}" con_github="${2:-}" src dst
+  umask 077
+  # OpenCode: solo entradas de tipo "api" y solo su clave. Otros tipos se renuevan o
+  # cargan configuración remota (que podría ejecutar código en este proyecto).
+  src="$origen/.local/share/opencode/auth.json"
+  dst="$HOME/.local/share/opencode/auth.json"
+  if [ -f "$src" ] && [ ! -L "$src" ]; then
+    mkdir -p "$(dirname "$dst")"
+    if jq -e 'with_entries(select(.value.type == "api") | .value |= {type, key}) | select(length > 0)' \
+        "$src" > "$dst.nuevo" 2>/dev/null; then
+      if [ -f "$dst" ]; then jq -s '.[0] * .[1]' "$dst" "$dst.nuevo" > "$dst.mezcla" && mv "$dst.mezcla" "$dst"
+      else mv "$dst.nuevo" "$dst"; fi
+      echo "  copiado: claves de API de OpenCode"
     fi
-    chmod 600 "$HOME/.claude.json"
+    rm -f "$dst.nuevo"
   fi
-  if [ -f "$HOME/.config/gh/hosts.yml" ]; then gh auth setup-git -h github.com >/dev/null 2>&1 || true; fi
+  if [ "$con_github" = "--con-github" ]; then
+    src="$origen/.config/gh/hosts.yml"
+    if [ -f "$src" ] && [ ! -L "$src" ]; then
+      mkdir -p "$HOME/.config/gh"
+      install -m 600 "$src" "$HOME/.config/gh/hosts.yml"
+      gh auth setup-git -h github.com >/dev/null 2>&1 || true
+      echo "  copiado: conexión con GitHub"
+    fi
+  fi
 }
 
 # Cambios sin subir a GitHub, para avisar antes de borrar un proyecto.
@@ -304,7 +310,7 @@ case "$opcion" in
   2|auto)         claude_autonomo "$@" ;;
   3|opencode)     opencode_libre "$@" ;;
   4|local)        opencode_local "$@" ;;
-  5|github)       github ;;
+  5|github)       github "$@" ;;
   6|claude-api)   claude_api "$@" ;;
   7|modelos)      modelos ;;
   preparar)       preparar "$@" ;;

@@ -77,7 +77,7 @@ Cada proyecto tiene su propio contenedor, con sus archivos separados de los dem�
 2. Aparece un enlace: copiarlo, abrirlo en el navegador e iniciar sesión con la cuenta de Claude.
 3. Copiar el código que muestra la web y pegarlo en la ventana negra (clic derecho para pegar).
 
-Cada proyecto tiene su propia sesión. Al crear otro proyecto, el menú ofrece copiarla para no tener que repetir este paso.
+Cada proyecto tiene su propia sesión: en cada proyecto nuevo, Claude Code pedirá iniciar sesión la primera vez.
 
 **¿Sin cuenta de pago de Claude?** La opción **3** (OpenCode) permite elegir otros proveedores dentro, incluidos modelos gratuitos.
 

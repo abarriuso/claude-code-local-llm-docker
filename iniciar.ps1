@@ -8,7 +8,7 @@ $Profiles = if ($LlamaCpp) { @("--profile", "llamacpp") } else { @() }
 $utf8 = New-Object Text.UTF8Encoding $false
 
 # Debe coincidir con LABEL entorno-ia.version del Dockerfile.
-$VersionImagen = "3"
+$VersionImagen = "4"
 # Cada proyecto es el proyecto de Compose "entorno-ia-<nombre>"; "general" es "entorno-ia".
 $Prefijo = "entorno-ia"
 $NombreValido = '^[a-z][a-z0-9-]{0,29}$'
@@ -328,17 +328,19 @@ function MenuProyecto($p) {
     }
 }
 
-# Copia las sesiones (solo credenciales de Claude, OpenCode y GitHub) de un proyecto a
-# otro. Se hace en un contenedor sin red que monta las dos carpetas personales.
-function CopiarSesion($origen, $destino) {
+# Copia de un proyecto a otro las claves de API de OpenCode y, con -ConGithub, la
+# conexión con GitHub (ver "ia importar-sesion"). Se hace en un contenedor sin red que
+# monta las dos carpetas personales.
+function CopiarSesion($origen, $destino, [switch]$ConGithub) {
     $parametros = @("run", "--rm", "--network", "none", "--entrypoint", "ia", "-u", "node",
         "-v", "$(NombreCompose $origen)_home:/origen:ro",
         "-v", "$(NombreCompose $destino)_home:/home/node",
         (Imagen), "importar-sesion", "/origen")
+    if ($ConGithub) { $parametros += "--con-github" }
     $copiado = @(Dock @parametros)
-    if ($LASTEXITCODE -ne 0) { Aviso "No se pudieron copiar las sesiones"; return }
-    if ($copiado.Count -eq 0) { Nota "El proyecto $origen no tiene sesiones iniciadas." ; return }
-    Ok "Sesiones copiadas del proyecto $origen"
+    if ($LASTEXITCODE -ne 0) { Aviso "No se pudo copiar nada del proyecto $origen"; return }
+    if ($copiado.Count -eq 0) { Nota "El proyecto $origen no tiene nada que copiar."; return }
+    foreach ($l in $copiado) { Ok ("Del proyecto ${origen}: " + ($l.Trim() -replace '^copiado: ', '')) }
 }
 
 function NuevoProyecto {
@@ -371,23 +373,35 @@ function NuevoProyecto {
 
     if (-not (Encender $nombre)) { Esperar-Tecla "No se pudo crear el proyecto" "Revisa los mensajes de arriba."; return }
 
-    # Cada proyecto tiene su carpeta personal; se ofrece reutilizar las sesiones de otro.
+    # Cada proyecto tiene su carpeta personal y sus sesiones. Se ofrece copiar de otro las
+    # claves de OpenCode y, aparte y sin marcar, la conexión con GitHub.
     $otros = @(Proyectos | Where-Object { $_.Nombre -ne $nombre } | ForEach-Object { $_.Nombre })
     if ($otros.Count -gt 0) {
         Write-Host ""
-        Nota "Cada proyecto tiene sus propias sesiones de Claude, OpenCode y GitHub."
-        Nota "Puedes copiarlas de otro proyecto para no tener que iniciar sesión de nuevo."
+        Nota "Este proyecto tiene sus propias sesiones: Claude Code te pedirá iniciar sesión"
+        Nota "la primera vez. Puedes copiar de otro proyecto de confianza sus claves de"
+        Nota "OpenCode y, si quieres, su conexión con GitHub."
+        $origen = ""
         if ($otros.Count -eq 1) {
-            $r = Leer "   ¿Copiar las sesiones del proyecto '$($otros[0])'? (S/n)"
+            $r = Leer "   ¿Copiar del proyecto '$($otros[0])'? (s/N)"
             if ($null -eq $r) { exit 0 }
-            if ($r.Trim() -notmatch '^[nN]') { CopiarSesion $otros[0] $nombre }
+            if ($r.Trim() -match '^[sS]') { $origen = $otros[0] }
         } else {
             Nota "Proyectos: $($otros -join ', ')"
             $origen = Leer "   ¿De cuál? (nombre, o Enter para no copiar)"
             if ($null -eq $origen) { exit 0 }
             $origen = $origen.Trim().ToLower()
-            if ($origen -and $otros -contains $origen) { CopiarSesion $origen $nombre }
-            elseif ($origen) { Aviso "No hay ningún proyecto llamado '$origen': no se copia nada" }
+            if ($origen -and $otros -notcontains $origen) {
+                Aviso "No hay ningún proyecto llamado '$origen': no se copia nada"
+                $origen = ""
+            }
+        }
+        if ($origen) {
+            Nota "Con la conexión con GitHub, este proyecto tendrá acceso a los mismos"
+            Nota "repositorios que '$origen'."
+            $r = Leer "   ¿Copiar también GitHub? (s/N)"
+            if ($null -eq $r) { exit 0 }
+            CopiarSesion $origen $nombre -ConGithub:($r.Trim() -match '^[sS]')
         }
         Write-Host ""
     }
@@ -397,7 +411,7 @@ function NuevoProyecto {
         if ($null -eq $r) { exit 0 }
         if ($r.Trim() -notmatch '^[nN]') {
             Write-Host ""
-            if (Aqui $nombre @("ia", "github")) { [void](Aqui $nombre @("ia", "preparar", $url)) }
+            if (Aqui $nombre @("ia", "github", "--de-nuevo")) { [void](Aqui $nombre @("ia", "preparar", $url)) }
         }
     }
     Write-Host ""
