@@ -9,12 +9,12 @@ Windows
 ├─ LM Studio (opcional) ── GPU ── :1234 ◄────────────────────┐
 │                                                            │
 └─ Docker Desktop                                            │
-   ├─ proyecto "web"     ── archivos propios · :3001 :5174   │
-   ├─ proyecto "tienda"  ── archivos propios · :3002 :5175   │
+   ├─ proyecto "web"     ── archivos y sesiones · :3001 :5174│
+   ├─ proyecto "tienda"  ── archivos y sesiones · :3002 :5175│
    │    Claude Code · OpenCode · git · gh · Node 22 · Python │
    │    usuario sin privilegios · cortafuegos de salida ─────┼──► Anthropic, GitHub, npm, PyPI
    │                                                         │
-   ├─ compartido: sesiones (Claude, OpenCode, GitHub) y modelos
+   ├─ compartido: la imagen y los modelos
    └─ llamacpp (opcional) ── GPU ── :8090 ◄──────────────────┘
 ```
 

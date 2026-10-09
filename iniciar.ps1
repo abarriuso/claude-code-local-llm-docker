@@ -328,11 +328,24 @@ function MenuProyecto($p) {
     }
 }
 
+# Copia las sesiones (solo credenciales de Claude, OpenCode y GitHub) de un proyecto a
+# otro. Se hace en un contenedor sin red que monta las dos carpetas personales.
+function CopiarSesion($origen, $destino) {
+    $parametros = @("run", "--rm", "--network", "none", "--entrypoint", "ia", "-u", "node",
+        "-v", "$(NombreCompose $origen)_home:/origen:ro",
+        "-v", "$(NombreCompose $destino)_home:/home/node",
+        (Imagen), "importar-sesion", "/origen")
+    $copiado = @(Dock @parametros)
+    if ($LASTEXITCODE -ne 0) { Aviso "No se pudieron copiar las sesiones"; return }
+    if ($copiado.Count -eq 0) { Nota "El proyecto $origen no tiene sesiones iniciadas." ; return }
+    Ok "Sesiones copiadas del proyecto $origen"
+}
+
 function NuevoProyecto {
     Banner
     Paso "NUEVO PROYECTO"
-    Nota "Cada proyecto tiene su propio contenedor: sus archivos, sus puertos y su"
-    Nota "historial de git. Los agentes de un proyecto no ven los de otro."
+    Nota "Cada proyecto tiene su propio contenedor: sus archivos, sus puertos, sus"
+    Nota "sesiones y su historial de git. Los agentes de un proyecto no ven los de otro."
     Write-Host ""
     Nota "Nombre corto en minúsculas, sin espacios ni tildes. Ejemplos: web, tienda, mi-app"
     $nombre = Leer "   Nombre (Enter para cancelar)"
@@ -357,6 +370,27 @@ function NuevoProyecto {
     Write-Host ""
 
     if (-not (Encender $nombre)) { Esperar-Tecla "No se pudo crear el proyecto" "Revisa los mensajes de arriba."; return }
+
+    # Cada proyecto tiene su carpeta personal; se ofrece reutilizar las sesiones de otro.
+    $otros = @(Proyectos | Where-Object { $_.Nombre -ne $nombre } | ForEach-Object { $_.Nombre })
+    if ($otros.Count -gt 0) {
+        Write-Host ""
+        Nota "Cada proyecto tiene sus propias sesiones de Claude, OpenCode y GitHub."
+        Nota "Puedes copiarlas de otro proyecto para no tener que iniciar sesión de nuevo."
+        if ($otros.Count -eq 1) {
+            $r = Leer "   ¿Copiar las sesiones del proyecto '$($otros[0])'? (S/n)"
+            if ($null -eq $r) { exit 0 }
+            if ($r.Trim() -notmatch '^[nN]') { CopiarSesion $otros[0] $nombre }
+        } else {
+            Nota "Proyectos: $($otros -join ', ')"
+            $origen = Leer "   ¿De cuál? (nombre, o Enter para no copiar)"
+            if ($null -eq $origen) { exit 0 }
+            $origen = $origen.Trim().ToLower()
+            if ($origen -and $otros -contains $origen) { CopiarSesion $origen $nombre }
+            elseif ($origen) { Aviso "No hay ningún proyecto llamado '$origen': no se copia nada" }
+        }
+        Write-Host ""
+    }
     if (-not (Aqui $nombre @("ia", "preparar", $url)) -and $url) {
         Write-Host ""
         $r = Leer "   ¿Conectar tu cuenta de GitHub y volver a intentarlo? (S/n)"
@@ -374,7 +408,8 @@ function NuevoProyecto {
 function BorrarProyecto($lista) {
     Banner
     Paso "BORRAR UN PROYECTO"
-    Nota "Se borran el contenedor y todos los archivos del proyecto. No se puede deshacer."
+    Nota "Se borran el contenedor, todos los archivos del proyecto y sus sesiones."
+    Nota "No se puede deshacer."
     Nota "Lo que esté subido a GitHub no se pierde."
     Write-Host ""
     $p = Leer "   Nombre del proyecto (Enter para cancelar)"
@@ -401,6 +436,7 @@ function BorrarProyecto($lista) {
     # Nunca "docker compose down -v": borraría también las sesiones y los modelos compartidos.
     Dock rm -f (Contenedor $p) | Out-Null
     Dock volume rm "$(NombreCompose $p)_workspace" | Out-Null
+    Dock volume rm "$(NombreCompose $p)_home" | Out-Null
     Ok "Proyecto $p borrado"
     Start-Sleep -Seconds 2
 }

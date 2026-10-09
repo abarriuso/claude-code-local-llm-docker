@@ -121,23 +121,57 @@ modelos() {
 }
 
 github() {
-  local u
+  local u r
   u="$(gh_user)"
   if [ -n "$u" ] && gh auth status -h github.com >/dev/null 2>&1; then
-    echo "Ya estás conectado a GitHub como $u."
-    read -rp "¿Conectar otra cuenta? (s/N) " r
-    [[ $r == [sS] ]] || exit 0
+    echo "Este proyecto ya está conectado a GitHub como $u."
+    read -rp "¿Conectar de nuevo? (s/N) " r
+    [[ $r == [sS] ]] || return 0
   fi
   echo
-  echo "Vas a conectar GitHub con un código de un solo uso:"
+  echo "  ¿Cómo quieres conectar GitHub en este proyecto?"
+  echo
+  echo "    1) Rápido: con un código de un solo uso. Da acceso a todos tus repositorios."
+  echo "    2) Limitado: con un token solo para los repositorios que elijas. Recomendado si"
+  echo "       usas el modo autónomo o trabajas con repositorios ajenos."
+  echo
+  read -rp "  > " r
+  case "$r" in
+    2) github_token ;;
+    *) github_codigo ;;
+  esac
+  gh auth setup-git
+  echo
+  echo "Conectado a GitHub como $(gh_user)."
+  echo "Consejo: protege la rama principal de tus repositorios en GitHub (Settings → Rules →"
+  echo "Rulesets: bloquear «force push» y el borrado) para que ningún agente pueda reescribirla."
+}
+
+github_codigo() {
+  echo
   echo "  1. Copia el código que aparece a continuación."
   echo "  2. Abre https://github.com/login/device en el navegador y pégalo."
   echo "  3. Si te pregunta por las credenciales de Git, pulsa Enter."
   echo
   gh auth login -h github.com -p https -w
-  gh auth setup-git
+}
+
+github_token() {
+  local token
   echo
-  echo "Conectado a GitHub como $(gh_user)."
+  echo "  1. Abre https://github.com/settings/personal-access-tokens/new"
+  echo "  2. Ponle un nombre y una caducidad (por ejemplo, 90 días)."
+  echo "  3. En «Repository access» elige «Only select repositories» y marca el"
+  echo "     repositorio de este proyecto."
+  echo "  4. En «Repository permissions» da «Read and write» a «Contents» y a «Pull requests»."
+  echo "  5. Pulsa «Generate token», cópialo y pégalo aquí (no se verá al pegarlo)."
+  echo
+  echo "  Con este token no se pueden crear repositorios nuevos: para eso, usa el modo rápido."
+  echo
+  read -rsp "  Token: " token
+  echo
+  [ -n "$token" ] || { echo "No se ha pegado ningún token."; exit 1; }
+  printf '%s\n' "$token" | gh auth login -h github.com -p https --with-token
 }
 
 preparar() {
@@ -169,6 +203,33 @@ preparar() {
     cp "$PLANTILLAS/gitignore" .gitignore
     echo "Proyecto vacío creado, con un CLAUDE.md de plantilla para los agentes."
   fi
+}
+
+# Copia las sesiones de otro proyecto (solo las credenciales: ni hooks, ni ajustes, ni
+# la confianza en carpetas). iniciar.ps1 lo ejecuta en un contenedor sin red con la
+# carpeta personal del otro proyecto montada en $1.
+importar_sesion() {
+  local origen="${1:?}" f
+  for f in .claude/.credentials.json .config/gh/hosts.yml .local/share/opencode/auth.json; do
+    [ -f "$origen/$f" ] || continue
+    mkdir -p "$HOME/$(dirname "$f")"
+    install -m 600 "$origen/$f" "$HOME/$f"
+    echo "  copiado: ~/$f"
+  done
+  # Datos de la cuenta de Claude (sin la lista de carpetas de confianza ni MCP).
+  if [ -f "$origen/.claude.json" ]; then
+    jq '{oauthAccount, userID, hasCompletedOnboarding, lastOnboardingVersion, theme}
+        | with_entries(select(.value != null))' "$origen/.claude.json" > "$HOME/.claude.json.nuevo"
+    if [ -f "$HOME/.claude.json" ]; then
+      jq -s '.[0] * .[1]' "$HOME/.claude.json" "$HOME/.claude.json.nuevo" > "$HOME/.claude.json.mezcla"
+      mv "$HOME/.claude.json.mezcla" "$HOME/.claude.json"
+      rm -f "$HOME/.claude.json.nuevo"
+    else
+      mv "$HOME/.claude.json.nuevo" "$HOME/.claude.json"
+    fi
+    chmod 600 "$HOME/.claude.json"
+  fi
+  if [ -f "$HOME/.config/gh/hosts.yml" ]; then gh auth setup-git -h github.com >/dev/null 2>&1 || true; fi
 }
 
 # Cambios sin subir a GitHub, para avisar antes de borrar un proyecto.
@@ -247,6 +308,7 @@ case "$opcion" in
   6|claude-api)   claude_api "$@" ;;
   7|modelos)      modelos ;;
   preparar)       preparar "$@" ;;
+  importar-sesion) importar_sesion "$@" ;;
   pendiente)      pendiente ;;
   --estado)
     api_configurada && api="configurada" || api="sin configurar"

@@ -150,22 +150,32 @@ jobs:
           general=entorno-ia-workspace-1
           prueba=entorno-ia-prueba-workspace-1
           test "$(docker port $prueba 3000)" = "127.0.0.1:3001"
-          # Los archivos no se comparten; la carpeta personal (sesiones) sí.
+          # Ni los archivos ni la carpeta personal (sesiones, hooks, configuración) se comparten.
           docker exec -u node $general sh -c 'echo x > /workspace/marca && echo x > /home/node/marca'
           ! docker exec -u node $prueba test -e /workspace/marca || exit 1
-          docker exec -u node $prueba test -e /home/node/marca
+          ! docker exec -u node $prueba test -e /home/node/marca || exit 1
+          # Copiar sesiones de otro proyecto (como iniciar.ps1): solo las credenciales.
+          docker exec -u node $general sh -c 'mkdir -p ~/.claude ~/.config/gh &&
+            echo "{}" > ~/.claude/.credentials.json &&
+            echo "github.com: {user: prueba}" > ~/.config/gh/hosts.yml &&
+            echo "{\"hooks\":{}}" > ~/.claude/settings.json'
+          docker run --rm --network none --entrypoint ia -u node \
+            -v entorno-ia_home:/origen:ro -v entorno-ia-prueba_home:/home/node \
+            "$(docker compose config --images | grep -v llama)" importar-sesion /origen
+          docker exec -u node $prueba test -e /home/node/.claude/.credentials.json
+          docker exec -u node $prueba test -e /home/node/.config/gh/hosts.yml
+          ! docker exec -u node $prueba test -e /home/node/.claude/settings.json || exit 1
           # Un servidor de desarrollo se abre desde el PC, pero no desde otro proyecto.
           docker exec -d -u node -w /workspace $general python3 -m http.server 8080 --bind 0.0.0.0
-          sleep 2
-          curl -sf --max-time 5 -o /dev/null http://127.0.0.1:8080
+          curl -sf --max-time 5 --retry 15 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8080
           ! docker exec -u node $prueba curl -s --max-time 5 -o /dev/null http://$general:8080 || exit 1
           # Proyecto nuevo con plantilla para los agentes.
           docker exec -u node -w /workspace $prueba ia preparar
           docker exec -u node $prueba grep -q '^# prueba' /workspace/CLAUDE.md
           test "$(docker exec -u node $prueba ia pendiente)" = "cambios sin guardar en git (commit)"
-          # Borrar un proyecto como lo hace iniciar.ps1 no toca lo compartido.
+          # Borrar un proyecto como lo hace iniciar.ps1 no toca los demás.
           docker rm -f $prueba
-          docker volume rm entorno-ia-prueba_workspace
+          docker volume rm entorno-ia-prueba_workspace entorno-ia-prueba_home
           docker exec -u node $general test -e /home/node/marca
       # Se publica exactamente la imagen que ha pasado las pruebas, para que
       # iniciar.cmd la descargue en vez de construirla.

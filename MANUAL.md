@@ -53,12 +53,11 @@ El script comprueba la instalación, abre Docker Desktop si está cerrado, crea 
 
 ## 4. Proyectos
 
-Cada proyecto vive en **su propio contenedor**, con sus archivos, su historial de git y sus puertos. Un agente que trabaja en un proyecto no puede ver ni tocar los demás.
+Cada proyecto vive en **su propio contenedor**, con sus archivos, su historial de git, sus puertos y su **carpeta personal**: las sesiones de Claude, OpenCode y GitHub, la configuración de los agentes y VS Code. Un agente que trabaja en un proyecto no puede ver ni tocar los demás, ni dejar en su configuración algo que afecte a otro.
 
 Lo que comparten todos los proyectos:
 
 - La imagen (Claude Code, OpenCode y las herramientas): se descarga una sola vez.
-- Las sesiones de Claude, OpenCode y GitHub: se inicia sesión una vez y vale para todos.
 - Los modelos de llama.cpp.
 
 La pantalla principal de `iniciar.cmd`:
@@ -76,8 +75,8 @@ La pantalla principal de `iniciar.cmd`:
 ```
 
 - **Abrir un proyecto:** escribir su número. Si estaba apagado, se enciende en unos segundos.
-- **Nuevo proyecto (N):** pide un nombre (minúsculas, números y guiones) y, opcionalmente, la dirección de un repositorio. Si el repositorio es privado y GitHub no está conectado, ofrece conectarlo. Un proyecto vacío empieza con git y un `CLAUDE.md` de plantilla para los agentes.
-- **Borrar (B):** borra el contenedor y los archivos del proyecto. Antes avisa si hay cambios sin guardar o sin subir a GitHub, y pide escribir el nombre otra vez.
+- **Nuevo proyecto (N):** pide un nombre (minúsculas, números y guiones) y ofrece **copiar las sesiones de otro proyecto**, para no tener que iniciar sesión de nuevo. Solo se copian las credenciales de Claude, OpenCode y GitHub; los ajustes, hooks y carpetas de confianza no. Después pide, opcionalmente, la dirección de un repositorio. Si es privado y GitHub no está conectado, ofrece conectarlo. Un proyecto vacío empieza con git y un `CLAUDE.md` de plantilla para los agentes.
+- **Borrar (B):** borra el contenedor, los archivos y las sesiones del proyecto. Antes avisa si hay cambios sin guardar o sin subir a GitHub, y pide escribir el nombre otra vez.
 
 **Puertos:** dentro de cada proyecto los servidores de desarrollo usan siempre 3000, 5173 y 8080. En Windows, cada proyecto los publica en puertos distintos para que puedan funcionar a la vez: el primer proyecto en 3001, 5174 y 8081, el segundo en 3002, 5175 y 8082, etc. El menú del proyecto muestra sus direcciones.
 
@@ -97,7 +96,7 @@ Las herramientas se abren en una **pestaña nueva** de Windows Terminal (o en un
 | **Herramientas** | |
 | 5 Terminal | Línea de comandos del proyecto (git, gh, npm, python…) |
 | 6 VS Code | Abre el proyecto en VS Code, conectado al contenedor. Instala sola la extensión *Dev Containers* |
-| 7 Conectar GitHub | Inicia sesión en GitHub con un código de un solo uso. Necesario para repositorios privados y para subir cambios |
+| 7 Conectar GitHub | Conecta GitHub en este proyecto. Necesario para repositorios privados y para subir cambios. **Rápido:** un código de un solo uso, con acceso a todos tus repositorios. **Limitado:** un token que creas en GitHub solo para el repositorio del proyecto; recomendado con el modo autónomo o con repositorios ajenos |
 | **Avanzado** | |
 | 8 Claude Code con API | Claude Code pagando por uso con `ANTHROPIC_API_KEY` |
 | 9 Modelos locales | Lista los modelos disponibles en LM Studio o llama.cpp |
@@ -121,7 +120,7 @@ ia -h            # ayuda
 2. En el menú del proyecto, **1** (Claude Code). La primera vez muestra una URL de inicio de sesión: abrirla en el navegador de Windows, iniciar sesión y pegar el código.
 3. Para subir el trabajo a GitHub: opción **7** (Conectar GitHub) una vez.
 
-Las sesiones de Claude Code, OpenCode y GitHub se conservan entre reinicios y valen para todos los proyectos.
+Las sesiones de Claude Code, OpenCode y GitHub se conservan entre reinicios. Son de cada proyecto: al crear otro, el menú ofrece copiarlas.
 
 Los agentes leen el archivo `CLAUDE.md` del proyecto al empezar: rellénalo (o pídeles que lo hagan con `/init`). Además conocen las reglas del entorno (puertos, cortafuegos, sin `sudo`) sin que haya que explicárselas. Más consejos en [Cómo trabajar con agentes](GUIA-AGENTES.md).
 
@@ -215,6 +214,7 @@ Los cambios se aplican al volver a abrir el proyecto desde `iniciar.cmd`. Solo e
 | Puertos locales | Los servidores de desarrollo solo son accesibles desde el propio PC |
 | Sin acceso entre proyectos ni al PC | Un proyecto no puede conectarse a otro. Del PC solo alcanza el puerto de `LOCAL_URL` (el modelo local) |
 | Puerto 53 cerrado | Los nombres se resuelven con el DNS de Docker; no se puede usar el puerto 53 como túnel hacia fuera |
+| Carpeta personal por proyecto | Sesiones, configuración de los agentes, carpetas de confianza de Claude y VS Code son de cada proyecto. Lo que un agente deje ahí no afecta a otros proyectos |
 | Clave de API protegida | `ANTHROPIC_API_KEY` llega como secreto que solo puede leer root. Solo la reciben las opciones 3 (OpenCode) y 8 (Claude Code con API). Ni la terminal, ni VS Code, ni el resto de opciones la tienen. Mientras la 3 o la 8 están abiertas, otro programa del mismo proyecto podría leerla |
 | Políticas de los agentes | Claude Code y OpenCode traen una configuración gestionada que los repositorios clonados no pueden cambiar. Claude Code: solo se ejecutan los hooks del entorno, no se usan servidores MCP y no lee archivos `.env` ni credenciales. OpenCode: pide permiso antes de editar o ejecutar comandos, no lee `.env`, e ignora la configuración, los agentes y los plugins que traiga el repositorio (sí lee su `AGENTS.md` y su `CLAUDE.md`) |
 
@@ -223,8 +223,8 @@ Destinos permitidos por defecto: Anthropic y Claude, GitHub, npm, PyPI, OpenCode
 **Lo que no cubre:**
 
 - **Instrucciones ocultas (*prompt injection*).** Un README, un issue o una web pueden contener instrucciones para el agente. El cortafuegos limita adónde puede enviar datos, pero GitHub, npm y las APIs de IA están permitidos. Por eso el modo autónomo es solo para proyectos de confianza.
-- **Lo que se comparte entre proyectos:** las sesiones (Claude, OpenCode, GitHub), el historial de conversaciones y la configuración de usuario de los agentes viven en la carpeta personal común. Un agente engañado en un proyecto podría dejar ahí algo que afecte a otro.
-- **El token de GitHub** que crea la opción 7 da acceso a todos tus repositorios. En GitHub, protege la rama principal (*Settings → Rules → Rulesets*: bloquear *force push* y borrado).
+- **Dentro de un mismo proyecto,** un agente engañado puede dejar en su configuración algo que se ejecute la próxima vez que abras ese proyecto. Si sospechas de un proyecto, bórralo y créalo de nuevo desde GitHub.
+- **El token de GitHub** del modo rápido (opción 7) da acceso a todos tus repositorios: un agente engañado podría usarlo en cualquiera. El modo limitado reduce el daño a los repositorios que elijas. En cualquier caso, protege la rama principal en GitHub (*Settings → Rules → Rulesets*: bloquear *force push* y borrado).
 - **VS Code conectado a un proyecto** es un puente hacia Windows: no lo uses con repositorios de los que no te fíes ni a la vez que el modo autónomo.
 - **Consultas DNS.** El DNS de Docker resuelve cualquier nombre, así que un agente engañado podría filtrar datos pequeños escondidos en nombres de dominio.
 - **Servidores MCP desactivados.** Por seguridad, Claude Code no carga ningún servidor MCP, tampoco los que añadas tú. OpenCode tampoco usa los que traiga un repositorio.
@@ -256,7 +256,7 @@ docker ps -aq --filter "name=entorno-ia" | ForEach-Object { docker rm -f $_ }
 docker volume ls -q --filter "name=entorno-ia" | ForEach-Object { docker volume rm $_ }
 ```
 
-No uses `docker compose down -v` con el proyecto de un nombre (`-p entorno-ia-…`): intentaría borrar también las sesiones y los modelos compartidos.
+No uses `docker compose down -v` con el proyecto de un nombre (`-p entorno-ia-…`): intentaría borrar también los modelos compartidos. Para borrar un proyecto, usa la opción **B**.
 
 ## 12. Solución de problemas
 
